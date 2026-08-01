@@ -53,8 +53,8 @@ async function publishCrash(roundData) {
     crashedAt: roundData.crashedAt
   });
 
-  const historyRef = ref(database, 'aviator/history');
-  await push(historyRef, {
+  const historyRef = ref(database, `aviator/history/${roundData.roundId}`);
+  await set(historyRef, {
     roundId: roundData.roundId,
     crashPoint: roundData.crashPoint,
     endedAt: roundData.crashedAt,

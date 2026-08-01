@@ -11,19 +11,50 @@ let currentRound = null;
 let roundTimer = null;
 let loopRunning = false;
 let crashThresholdQueue = [];
+let crashRange = { min: 1.0, max: 1000.0 };
+
+function getCrashRange() {
+  return { ...crashRange };
+}
+
+function setCrashRange({ min, max }) {
+  if (typeof min !== 'number' || typeof max !== 'number') {
+    throw new Error('Crash range values must be numbers');
+  }
+  if (Number.isNaN(min) || Number.isNaN(max)) {
+    throw new Error('Crash range values must be valid numbers');
+  }
+  if (min < 1 || max < 1) {
+    throw new Error('Crash range must be at least 1.00');
+  }
+  if (min > max) {
+    throw new Error('Minimum crash point must be less than or equal to maximum crash point');
+  }
+  if (max > 1000) {
+    throw new Error('Maximum crash point must not exceed 1000.00');
+  }
+
+  crashRange = {
+    min: Number(min.toFixed(2)),
+    max: Number(max.toFixed(2)),
+  };
+  crashThresholdQueue = createCrashThresholdQueue();
+  return getCrashRange();
+}
 
 function getCrashPointFromHash(hash) {
   const bytes = Buffer.from(hash, 'hex');
   const value = bytes.readUInt32BE(0) / 0xffffffff;
   const base = 1 + (value * 100);
   const multiplier = 1 + (base - 1) * (1 - HOUSE_EDGE);
-  const capped = Math.min(multiplier, 1000);
+  const capped = Math.min(multiplier, crashRange.max);
 
   if (value < 0.01) {
     return INSTANT_CRASH_THRESHOLD;
   }
 
-  return Number(capped.toFixed(2));
+  const crashPoint = Number(capped.toFixed(2));
+  return Number(Math.max(crashRange.min, crashPoint).toFixed(2));
 }
 
 function createServerSeed() {
@@ -75,7 +106,6 @@ async function startRoundLoop() {
   const startNewRound = async () => {
     try {
       const threshold = getNextCrashThreshold();
-      console.log('[Aviator] startNewRound', { roundSeed: threshold.hash, crashPoint: threshold.crashPoint });
       const roundId = await createRound({
         hash: threshold.hash,
         serverSeed: null,
@@ -112,12 +142,10 @@ async function startRoundLoop() {
           currentRound.phase = 'waiting';
           currentRound.status = 'waiting';
           currentRound.multiplier = 1;
-          console.log('[Aviator] countdown tick', { roundId, remaining: currentRound.countdown });
           await publishCountdown(currentRound.countdown);
           await publishMultiplier(1, null, roundId, 'waiting', 'waiting');
           if (remaining <= 0) {
             clearInterval(countdownInterval);
-            console.log('[Aviator] countdown complete, beginning flight', { roundId });
             void beginFlight();
           }
         } catch (error) {
@@ -145,7 +173,6 @@ async function startRoundLoop() {
     }
 
     try {
-      console.log('[Aviator] beginFlight', { roundId: currentRound.id, pendingCrashPoint: currentRound.pendingCrashPoint });
       const crashPoint = currentRound.pendingCrashPoint ?? getCrashPointFromHash(currentRound.hash);
       currentRound.crashPoint = crashPoint;
       currentRound.phase = 'flying';
@@ -161,15 +188,17 @@ async function startRoundLoop() {
       });
       await publishMultiplier(1, crashPoint, currentRound.id, 'flying', 'flying');
 
-      const stepMs = 100;
+      const stepMs = 150;
       const startTime = Date.now();
 
       const flightInterval = setInterval(async () => {
         try {
           const elapsed = (Date.now() - startTime) / 1000;
-          const multiplier = Math.min(1 + (elapsed * 0.75) + (elapsed * elapsed * 0.05), crashPoint);
+          const multiplier = Math.min(
+            1 + elapsed * 0.16 + Math.pow(elapsed, 2) * 0.01,
+            crashPoint
+          );
           currentRound.multiplier = Number(multiplier.toFixed(2));
-          console.log('[Aviator] flight tick', { roundId: currentRound.id, multiplier: currentRound.multiplier, crashPoint });
           await publishMultiplier(currentRound.multiplier, crashPoint, currentRound.id, 'flying', 'flying');
 
           if (currentRound.multiplier >= crashPoint) {
@@ -295,5 +324,7 @@ module.exports = {
   placeBet,
   cashOutBet,
   getPublicState,
-  getCrashQueue
+  getCrashQueue,
+  getCrashRange,
+  setCrashRange
 };

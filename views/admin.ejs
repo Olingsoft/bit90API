@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= title %></title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: #0b1224;
+        color: #e8effa;
+      }
+      .page {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+      }
+      .card {
+        background: rgba(20, 36, 63, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+      .grid {
+        display: grid;
+        gap: 20px;
+      }
+      .grid-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .table th,
+      .table td {
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .table th {
+        color: #c3d4ff;
+        text-align: left;
+        font-size: 14px;
+      }
+      .table td {
+        color: #f1f7ff;
+        font-size: 13px;
+      }
+      .badge {
+        display: inline-flex;
+        padding: 5px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .badge-waiting { background: #2e3b56; color: #b1b8e4; }
+      .badge-flying { background: #1f3c5a; color: #8be1ff; }
+      .badge-crashed { background: #5a2833; color: #ff8fa3; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="header">
+        <div>
+          <h1 style="margin:0; font-size: 2rem;">Aviator Admin Dashboard</h1>
+          <p style="margin: 6px 0 0 0; color: #9fb3d1;">Live round status, pending queue, and history-ready data.</p>
+        </div>
+      </div>
+
+      <div class="card grid grid-2">
+        <div>
+          <h2 style="margin-top: 0;">Live State</h2>
+          <table class="table">
+            <tbody>
+              <tr><th>Phase</th><td><span class="badge badge-<%= publicState.phase %>"><%= publicState.phase %></span></td></tr>
+              <tr><th>Round ID</th><td><%= publicState.roundId || 'N/A' %></td></tr>
+              <tr><th>Countdown</th><td><%= publicState.countdown %>s</td></tr>
+              <tr><th>Multiplier</th><td><%= publicState.multiplier.toFixed(2) %>x</td></tr>
+              <tr><th>Crash Point</th><td><%= publicState.crashPoint ? publicState.crashPoint.toFixed(2) + 'x' : 'TBD' %></td></tr>
+              <tr><th>Hash</th><td><code style="color:#a7c3ff;"><%= publicState.hash || 'N/A' %></code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h2 style="margin-top: 0;">Pending Queue</h2>
+          <table class="table">
+            <thead>
+              <tr><th>#</th><th>Hash</th><th>Crash Point</th></tr>
+            </thead>
+            <tbody>
+              <% crashQueue.forEach((item) => { %>
+                <tr>
+                  <td><%= item.position %></td>
+                  <td><code style="color:#a7c3ff;"><%= item.hash.slice(0, 12) %>...</code></td>
+                  <td><%= item.crashPoint.toFixed(2) %>x</td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top: 0;">Usage</h2>
+        <p style="margin: 0; color:#b8c8e9;">Visit <code>/admin</code> while authenticated as an admin user to inspect live state and queue entries. If needed, extend the dashboard with controls for round creation or queue management.</p>
+      </div>
+    </div>
+  </body>
+</html>

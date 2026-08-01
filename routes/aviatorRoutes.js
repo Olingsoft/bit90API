@@ -1,5 +1,5 @@
 const express = require('express');
-const authMiddleware = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
 const { placeBet, cashOutBet, getPublicState, getCrashQueue } = require('../services/aviatorEngine');
 const { listRounds } = require('../models/aviatorModel');
 

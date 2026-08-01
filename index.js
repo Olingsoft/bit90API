@@ -1,9 +1,12 @@
+const path = require('path');
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const userRoutes = require('./routes/userRoutes');
 const aviatorRoutes = require('./routes/aviatorRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const adminAuthRoutes = require('./routes/adminAuthRoutes');
 const { startRoundLoop } = require('./services/aviatorEngine');
 
 dotenv.config();
@@ -12,7 +15,25 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = '127.0.0.1';
 
-app.use(cors());
+app.set('views', path.join(__dirname, 'views'));
+app.set('view engine', 'ejs');
+app.use(express.static(path.join(__dirname, 'public')));
+// Configure CORS to allow the Next.js frontend origins and enable credentials
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000'
+];
+app.use(cors({
+  origin: function (origin, callback) {
+    // allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      return callback(null, true);
+    }
+    return callback(new Error('CORS policy: Origin not allowed'));
+  },
+  credentials: true
+}));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -25,6 +46,8 @@ app.get('/', (req, res) => {
 
 app.use('/users', userRoutes);
 app.use('/aviator', aviatorRoutes);
+app.use('/admin', adminAuthRoutes);
+app.use('/admin', adminRoutes);
 
 startRoundLoop().catch((error) => {
   console.error('Failed to start aviator round loop', error);
