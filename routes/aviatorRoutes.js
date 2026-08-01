@@ -1,0 +1,45 @@
+const express = require('express');
+const authMiddleware = require('../middleware/auth');
+const { placeBet, cashOutBet, getPublicState } = require('../services/aviatorEngine');
+const { listRounds } = require('../models/aviatorModel');
+
+const router = express.Router();
+
+router.get('/state', (req, res) => {
+  try {
+    res.json(getPublicState());
+  } catch (error) {
+    res.status(500).json({ message: 'Unable to get aviator state', error: error.message });
+  }
+});
+
+router.get('/history', async (req, res) => {
+  try {
+    const rounds = await listRounds(20);
+    res.json(rounds);
+  } catch (error) {
+    res.status(500).json({ message: 'Unable to fetch aviator history', error: error.message });
+  }
+});
+
+router.post('/bet', authMiddleware, async (req, res) => {
+  try {
+    const { amount, roundId } = req.body;
+    const result = await placeBet(req.user.id, amount, roundId || getPublicState().roundId);
+    res.status(200).json({ message: 'Bet accepted', ...result });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+router.post('/cashout', authMiddleware, async (req, res) => {
+  try {
+    const { roundId } = req.body;
+    const result = await cashOutBet(req.user.id, roundId || getPublicState().roundId);
+    res.status(200).json({ message: 'Cashout successful', ...result });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+module.exports = router;
