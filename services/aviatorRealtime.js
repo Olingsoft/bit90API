@@ -30,16 +30,16 @@ async function publishRoundStart(roundData) {
   return roundData;
 }
 
-async function publishMultiplier(multiplier, crashPoint, roundId) {
+async function publishMultiplier(multiplier, crashPoint, roundId, phase = 'flying', status = phase) {
   if (!isReady()) return null;
   await update(ref(database, 'aviator/live'), {
     multiplier,
     crashPoint,
     roundId,
-    phase: 'flying',
-    status: 'flying'
+    phase,
+    status
   });
-  return { multiplier, crashPoint, roundId };
+  return { multiplier, crashPoint, roundId, phase, status };
 }
 
 async function publishCrash(roundData) {

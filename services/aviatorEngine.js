@@ -73,116 +73,162 @@ async function startRoundLoop() {
   loopRunning = true;
 
   const startNewRound = async () => {
-    const threshold = getNextCrashThreshold();
-    const roundId = await createRound({
-      hash: threshold.hash,
-      serverSeed: null,
-      crashPoint: null,
-      status: 'waiting',
-      phase: 'waiting',
-      countdown: ROUND_WAIT_SECONDS,
-      multiplier: 1,
-      startedAt: new Date().toISOString()
-    });
+    try {
+      const threshold = getNextCrashThreshold();
+      console.log('[Aviator] startNewRound', { roundSeed: threshold.hash, crashPoint: threshold.crashPoint });
+      const roundId = await createRound({
+        hash: threshold.hash,
+        serverSeed: null,
+        crashPoint: null,
+        status: 'waiting',
+        phase: 'waiting',
+        countdown: ROUND_WAIT_SECONDS,
+        multiplier: 1,
+        startedAt: new Date().toISOString()
+      });
 
-    currentRound = {
-      id: roundId,
-      hash: threshold.hash,
-      serverSeed: threshold.serverSeed,
-      crashPoint: null,
-      pendingCrashPoint: threshold.crashPoint,
-      status: 'waiting',
-      phase: 'waiting',
-      countdown: ROUND_WAIT_SECONDS,
-      multiplier: 1,
-      startedAt: new Date().toISOString()
-    };
+      currentRound = {
+        id: roundId,
+        hash: threshold.hash,
+        serverSeed: threshold.serverSeed,
+        crashPoint: null,
+        pendingCrashPoint: threshold.crashPoint,
+        status: 'waiting',
+        phase: 'waiting',
+        countdown: ROUND_WAIT_SECONDS,
+        multiplier: 1,
+        startedAt: new Date().toISOString()
+      };
 
-    await publishRoundStart({ roundId, startedAt: currentRound.startedAt, crashPoint: null });
-    await publishCountdown(ROUND_WAIT_SECONDS);
-    await publishMultiplier(1, null, roundId);
+      await publishRoundStart({ roundId, startedAt: currentRound.startedAt, crashPoint: null });
+      await publishCountdown(ROUND_WAIT_SECONDS);
+      await publishMultiplier(1, null, roundId, 'waiting', 'waiting');
 
-    let remaining = ROUND_WAIT_SECONDS;
-    const countdownInterval = setInterval(async () => {
-      remaining -= 1;
-      currentRound.countdown = Math.max(remaining, 0);
-      currentRound.phase = 'waiting';
-      currentRound.status = 'waiting';
-      currentRound.multiplier = 1;
-      await publishCountdown(currentRound.countdown);
-      await publishMultiplier(1, null, roundId);
-      if (remaining <= 0) {
-        clearInterval(countdownInterval);
-        void beginFlight();
-      }
-    }, 1000);
+      let remaining = ROUND_WAIT_SECONDS;
+      const countdownInterval = setInterval(async () => {
+        try {
+          remaining -= 1;
+          currentRound.countdown = Math.max(remaining, 0);
+          currentRound.phase = 'waiting';
+          currentRound.status = 'waiting';
+          currentRound.multiplier = 1;
+          console.log('[Aviator] countdown tick', { roundId, remaining: currentRound.countdown });
+          await publishCountdown(currentRound.countdown);
+          await publishMultiplier(1, null, roundId, 'waiting', 'waiting');
+          if (remaining <= 0) {
+            clearInterval(countdownInterval);
+            console.log('[Aviator] countdown complete, beginning flight', { roundId });
+            void beginFlight();
+          }
+        } catch (error) {
+          console.error('Aviator countdown error', error);
+          clearInterval(countdownInterval);
+          setTimeout(() => {
+            void startNewRound();
+          }, 1000);
+        }
+      }, 1000);
 
-    roundTimer = countdownInterval;
+      roundTimer = countdownInterval;
+    } catch (error) {
+      console.error('Aviator round start failed', error);
+      setTimeout(() => {
+        void startNewRound();
+      }, 1000);
+    }
   };
 
   const beginFlight = async () => {
-    if (!currentRound) return;
-    const crashPoint = currentRound.pendingCrashPoint ?? getCrashPointFromHash(currentRound.hash);
-    currentRound.crashPoint = crashPoint;
-    currentRound.phase = 'flying';
-    currentRound.status = 'flying';
-    currentRound.multiplier = 1;
+    if (!currentRound) {
+      console.error('[Aviator] beginFlight called without currentRound');
+      return;
+    }
 
-    await updateRound(currentRound.id, {
-      crashPoint,
-      phase: 'flying',
-      status: 'flying',
-      multiplier: 1,
-      startedAt: currentRound.startedAt
-    });
-    await publishMultiplier(1, crashPoint, currentRound.id);
+    try {
+      console.log('[Aviator] beginFlight', { roundId: currentRound.id, pendingCrashPoint: currentRound.pendingCrashPoint });
+      const crashPoint = currentRound.pendingCrashPoint ?? getCrashPointFromHash(currentRound.hash);
+      currentRound.crashPoint = crashPoint;
+      currentRound.phase = 'flying';
+      currentRound.status = 'flying';
+      currentRound.multiplier = 1;
 
-    const flightDurationMs = 1200;
-    const stepMs = 100;
-    const startTime = Date.now();
+      await updateRound(currentRound.id, {
+        crashPoint,
+        phase: 'flying',
+        status: 'flying',
+        multiplier: 1,
+        startedAt: currentRound.startedAt
+      });
+      await publishMultiplier(1, crashPoint, currentRound.id, 'flying', 'flying');
 
-    const flightInterval = setInterval(async () => {
-      const elapsed = (Date.now() - startTime) / 1000;
-      const multiplier = Math.min(1 + (elapsed * 0.75) + (elapsed * elapsed * 0.05), crashPoint);
-      currentRound.multiplier = Number(multiplier.toFixed(2));
-      await publishMultiplier(currentRound.multiplier, crashPoint, currentRound.id);
+      const stepMs = 100;
+      const startTime = Date.now();
 
-      if (currentRound.multiplier >= crashPoint) {
-        clearInterval(flightInterval);
-        await crashRound();
-      }
-    }, stepMs);
+      const flightInterval = setInterval(async () => {
+        try {
+          const elapsed = (Date.now() - startTime) / 1000;
+          const multiplier = Math.min(1 + (elapsed * 0.75) + (elapsed * elapsed * 0.05), crashPoint);
+          currentRound.multiplier = Number(multiplier.toFixed(2));
+          console.log('[Aviator] flight tick', { roundId: currentRound.id, multiplier: currentRound.multiplier, crashPoint });
+          await publishMultiplier(currentRound.multiplier, crashPoint, currentRound.id, 'flying', 'flying');
+
+          if (currentRound.multiplier >= crashPoint) {
+            clearInterval(flightInterval);
+            await crashRound();
+          }
+        } catch (error) {
+          console.error('Aviator flight tick error', error);
+          clearInterval(flightInterval);
+          setTimeout(() => {
+            void startNewRound();
+          }, 1000);
+        }
+      }, stepMs);
+    } catch (error) {
+      console.error('Aviator flight start failed', error);
+      setTimeout(() => {
+        void startNewRound();
+      }, 1000);
+    }
   };
 
   const crashRound = async () => {
     if (!currentRound) return;
-    const crashedAt = new Date().toISOString();
-    currentRound.phase = 'crashed';
-    currentRound.status = 'crashed';
-    currentRound.crashedAt = crashedAt;
-    currentRound.serverSeed = currentRound.serverSeed || null;
-    currentRound.revealedAt = crashedAt;
 
-    await updateRound(currentRound.id, {
-      phase: 'crashed',
-      status: 'crashed',
-      crashPoint: currentRound.crashPoint,
-      multiplier: currentRound.crashPoint,
-      crashedAt,
-      serverSeed: currentRound.serverSeed,
-      revealedAt: crashedAt
-    });
-    await publishCrash({
-      roundId: currentRound.id,
-      crashPoint: currentRound.crashPoint,
-      crashedAt,
-      serverSeed: currentRound.serverSeed,
-      hash: currentRound.hash
-    });
+    try {
+      const crashedAt = new Date().toISOString();
+      currentRound.phase = 'crashed';
+      currentRound.status = 'crashed';
+      currentRound.crashedAt = crashedAt;
+      currentRound.serverSeed = currentRound.serverSeed || null;
+      currentRound.revealedAt = crashedAt;
 
-    setTimeout(() => {
-      void startNewRound();
-    }, 2000);
+      await updateRound(currentRound.id, {
+        phase: 'crashed',
+        status: 'crashed',
+        crashPoint: currentRound.crashPoint,
+        multiplier: currentRound.crashPoint,
+        crashedAt,
+        serverSeed: currentRound.serverSeed,
+        revealedAt: crashedAt
+      });
+      await publishCrash({
+        roundId: currentRound.id,
+        crashPoint: currentRound.crashPoint,
+        crashedAt,
+        serverSeed: currentRound.serverSeed,
+        hash: currentRound.hash
+      });
+
+      setTimeout(() => {
+        void startNewRound();
+      }, 2000);
+    } catch (error) {
+      console.error('Aviator crash handling failed', error);
+      setTimeout(() => {
+        void startNewRound();
+      }, 1000);
+    }
   };
 
   await startNewRound();

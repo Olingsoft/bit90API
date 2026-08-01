@@ -26,10 +26,16 @@ const firebaseConfig = {
   projectId: process.env.FIREBASE_PROJECT_ID || 'demo-project',
   storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'demo-project.firebasestorage.app',
   messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || '0000000000',
-  appId: process.env.FIREBASE_APP_ID || '1:0000000000:web:demo',
+  appId: process.env.FIREBASE_APP_ID || '1:0000000:web:demo',
   measurementId: process.env.FIREBASE_MEASUREMENT_ID || 'G-DEMO',
   databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://demo-project-default-rtdb.firebaseio.com'
 };
+
+if (!process.env.FIREBASE_DATABASE_URL) {
+  console.warn('[Firebase] FIREBASE_DATABASE_URL is missing; using fallback demo RTDB URL.');
+} else {
+  console.log('[Firebase] RTDB URL configured as', process.env.FIREBASE_DATABASE_URL);
+}
 
 let app = null;
 let db = null;
