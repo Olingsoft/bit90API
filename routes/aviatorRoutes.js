@@ -1,9 +1,16 @@
 const express = require('express');
 const authMiddleware = require('../middleware/auth');
-const { placeBet, cashOutBet, getPublicState } = require('../services/aviatorEngine');
+const { placeBet, cashOutBet, getPublicState, getCrashQueue } = require('../services/aviatorEngine');
 const { listRounds } = require('../models/aviatorModel');
 
 const router = express.Router();
+
+function isAdminUser(user) {
+  if (!user) return false;
+  if (user.isAdmin === true) return true;
+  if (user.role === 'admin' || user.role === 'superadmin') return true;
+  return false;
+}
 
 router.get('/state', (req, res) => {
   try {
@@ -19,6 +26,18 @@ router.get('/history', async (req, res) => {
     res.json(rounds);
   } catch (error) {
     res.status(500).json({ message: 'Unable to fetch aviator history', error: error.message });
+  }
+});
+
+router.get('/admin/queue', authMiddleware, (req, res) => {
+  if (!isAdminUser(req.user)) {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+
+  try {
+    res.json({ queue: getCrashQueue() });
+  } catch (error) {
+    res.status(500).json({ message: 'Unable to get crash queue', error: error.message });
   }
 });
 

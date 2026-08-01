@@ -5,10 +5,12 @@ const { publishCountdown, publishRoundStart, publishMultiplier, publishCrash } =
 const ROUND_WAIT_SECONDS = 5;
 const HOUSE_EDGE = 0.03;
 const INSTANT_CRASH_THRESHOLD = 1.0;
+const CRASH_QUEUE_SIZE = 10;
 
 let currentRound = null;
 let roundTimer = null;
 let loopRunning = false;
+let crashThresholdQueue = [];
 
 function getCrashPointFromHash(hash) {
   const bytes = Buffer.from(hash, 'hex');
@@ -26,6 +28,31 @@ function getCrashPointFromHash(hash) {
 
 function createServerSeed() {
   return crypto.randomBytes(16).toString('hex');
+}
+
+function createCrashThresholdQueue(size = CRASH_QUEUE_SIZE) {
+  return Array.from({ length: size }, () => {
+    const serverSeed = createServerSeed();
+    const hash = crypto.createHash('sha256').update(serverSeed).digest('hex');
+    const crashPoint = getCrashPointFromHash(hash);
+    return { serverSeed, hash, crashPoint };
+  });
+}
+
+function getCrashQueue() {
+  return crashThresholdQueue.map((item, index) => ({
+    position: index + 1,
+    hash: item.hash,
+    crashPoint: item.crashPoint
+  }));
+}
+
+function getNextCrashThreshold() {
+  if (crashThresholdQueue.length === 0) {
+    crashThresholdQueue = createCrashThresholdQueue();
+  }
+
+  return crashThresholdQueue.shift();
 }
 
 function getPublicState() {
@@ -46,10 +73,9 @@ async function startRoundLoop() {
   loopRunning = true;
 
   const startNewRound = async () => {
-    const serverSeed = createServerSeed();
-    const hash = crypto.createHash('sha256').update(serverSeed).digest('hex');
+    const threshold = getNextCrashThreshold();
     const roundId = await createRound({
-      hash,
+      hash: threshold.hash,
       serverSeed: null,
       crashPoint: null,
       status: 'waiting',
@@ -61,9 +87,10 @@ async function startRoundLoop() {
 
     currentRound = {
       id: roundId,
-      hash,
-      serverSeed,
+      hash: threshold.hash,
+      serverSeed: threshold.serverSeed,
       crashPoint: null,
+      pendingCrashPoint: threshold.crashPoint,
       status: 'waiting',
       phase: 'waiting',
       countdown: ROUND_WAIT_SECONDS,
@@ -73,6 +100,7 @@ async function startRoundLoop() {
 
     await publishRoundStart({ roundId, startedAt: currentRound.startedAt, crashPoint: null });
     await publishCountdown(ROUND_WAIT_SECONDS);
+    await publishMultiplier(1, null, roundId);
 
     let remaining = ROUND_WAIT_SECONDS;
     const countdownInterval = setInterval(async () => {
@@ -80,7 +108,9 @@ async function startRoundLoop() {
       currentRound.countdown = Math.max(remaining, 0);
       currentRound.phase = 'waiting';
       currentRound.status = 'waiting';
+      currentRound.multiplier = 1;
       await publishCountdown(currentRound.countdown);
+      await publishMultiplier(1, null, roundId);
       if (remaining <= 0) {
         clearInterval(countdownInterval);
         void beginFlight();
@@ -92,7 +122,7 @@ async function startRoundLoop() {
 
   const beginFlight = async () => {
     if (!currentRound) return;
-    const crashPoint = getCrashPointFromHash(currentRound.hash);
+    const crashPoint = currentRound.pendingCrashPoint ?? getCrashPointFromHash(currentRound.hash);
     currentRound.crashPoint = crashPoint;
     currentRound.phase = 'flying';
     currentRound.status = 'flying';
@@ -131,6 +161,7 @@ async function startRoundLoop() {
     currentRound.status = 'crashed';
     currentRound.crashedAt = crashedAt;
     currentRound.serverSeed = currentRound.serverSeed || null;
+    currentRound.revealedAt = crashedAt;
 
     await updateRound(currentRound.id, {
       phase: 'crashed',
@@ -138,7 +169,8 @@ async function startRoundLoop() {
       crashPoint: currentRound.crashPoint,
       multiplier: currentRound.crashPoint,
       crashedAt,
-      serverSeed: currentRound.serverSeed
+      serverSeed: currentRound.serverSeed,
+      revealedAt: crashedAt
     });
     await publishCrash({
       roundId: currentRound.id,
@@ -216,5 +248,6 @@ module.exports = {
   startRoundLoop,
   placeBet,
   cashOutBet,
-  getPublicState
+  getPublicState,
+  getCrashQueue
 };
