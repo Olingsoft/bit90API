@@ -24,14 +24,29 @@ app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'ejs');
 app.use(express.static(path.join(__dirname, 'public')));
 
-const allowedOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+const envOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
+  : [];
+
+const allowedOrigins = Array.from(
+  new Set([
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://bit90.vercel.app',
+    ...envOrigins,
+  ])
+);
 
 app.use(
   cors({
     origin(origin, callback) {
       console.log("Incoming Origin:", origin);
       if (!origin) return callback(null, true);
-      if (allowedOrigins.indexOf(origin) !== -1) {
+      const normalizedOrigin = origin.replace(/\/$/, '');
+      const isAllowed = allowedOrigins.some(
+        (o) => o.replace(/\/$/, '') === normalizedOrigin
+      );
+      if (isAllowed) {
         return callback(null, true);
       }
       return callback(new Error('CORS policy: Origin not allowed'));
@@ -58,7 +73,17 @@ app.use('/admin', adminRoutes);
 const server = http.createServer(app);
 const io = initSocket(server, {
   cors: {
-    origin: allowedOrigins,
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      const normalizedOrigin = origin.replace(/\/$/, '');
+      const isAllowed = allowedOrigins.some(
+        (o) => o.replace(/\/$/, '') === normalizedOrigin
+      );
+      if (isAllowed) {
+        return callback(null, true);
+      }
+      return callback(new Error('CORS policy: Origin not allowed'));
+    },
     methods: ['GET', 'POST'],
     credentials: true,
   },
