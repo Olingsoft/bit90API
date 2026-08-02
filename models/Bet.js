@@ -53,4 +53,15 @@ betSchema.index({ roundId: 1 });
 betSchema.index({ status: 1 });
 betSchema.index({ createdAt: -1 });
 
-module.exports = mongoose.model('Bet', betSchema);
+const Bet = mongoose.model('Bet', betSchema);
+
+// Drop legacy single-bet index { userId: 1, roundId: 1 } if it exists in MongoDB
+Bet.init()
+  .then(() => {
+    Bet.collection.dropIndex('userId_1_roundId_1').catch(() => {
+      // Legacy index already dropped or not present
+    });
+  })
+  .catch(() => {});
+
+module.exports = Bet;
