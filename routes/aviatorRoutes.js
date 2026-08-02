@@ -43,8 +43,13 @@ router.get('/admin/queue', authMiddleware, (req, res) => {
 
 router.post('/bet', authMiddleware, async (req, res) => {
   try {
-    const { amount, roundId } = req.body;
-    const result = await placeBet(req.user.id, amount, roundId || getPublicState().roundId);
+    const { amount, roundId, panelIndex } = req.body;
+    const result = await placeBet(
+      req.user.id,
+      amount,
+      roundId || getPublicState().roundId,
+      Number(panelIndex) || 1
+    );
     res.status(200).json({ message: 'Bet accepted', ...result });
   } catch (error) {
     res.status(400).json({ message: error.message });
@@ -53,8 +58,12 @@ router.post('/bet', authMiddleware, async (req, res) => {
 
 router.post('/cashout', authMiddleware, async (req, res) => {
   try {
-    const { roundId } = req.body;
-    const result = await cashOutBet(req.user.id, roundId || getPublicState().roundId);
+    const { roundId, panelIndex } = req.body;
+    const result = await cashOutBet(
+      req.user.id,
+      roundId || getPublicState().roundId,
+      Number(panelIndex) || 1
+    );
     res.status(200).json({ message: 'Cashout successful', ...result });
   } catch (error) {
     res.status(400).json({ message: error.message });

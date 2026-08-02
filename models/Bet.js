@@ -37,13 +37,17 @@ const betSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    panelIndex: {
+      type: Number,
+      default: 1,
+    },
   },
   {
     timestamps: true,
   }
 );
 
-betSchema.index({ userId: 1, roundId: 1 }, { unique: true });
+betSchema.index({ userId: 1, roundId: 1, panelIndex: 1 }, { unique: true });
 betSchema.index({ userId: 1 });
 betSchema.index({ roundId: 1 });
 betSchema.index({ status: 1 });

@@ -96,6 +96,7 @@ async function createBet(betData, session = null) {
         userId: betData.userId,
         roundId: betData.roundId,
         amount: betData.amount,
+        panelIndex: betData.panelIndex || 1,
         status: betData.status || 'placed',
         cashOutMultiplier: betData.cashOutMultiplier ?? null,
         payout: betData.payout ?? 0,
@@ -123,12 +124,15 @@ async function updateBet(betId, data, session = null) {
   return betId;
 }
 
-async function getBetByUserAndRound(userId, roundId) {
+async function getBetByUserAndRound(userId, roundId, panelIndex = 1) {
   if (!isValidObjectId(userId) || !isValidObjectId(roundId)) {
     return null;
   }
 
-  const bet = await Bet.findOne({ userId, roundId });
+  const query = { userId, roundId };
+  if (panelIndex) query.panelIndex = Number(panelIndex);
+
+  const bet = await Bet.findOne(query);
   return formatBet(bet);
 }
 
@@ -224,7 +228,7 @@ async function adjustBalance(userId, delta, options = {}) {
   return user.balance;
 }
 
-async function placeBetWithTransaction(userId, roundId, amount) {
+async function placeBetWithTransaction(userId, roundId, amount, panelIndex = 1) {
   if (!isValidObjectId(userId)) {
     throw new Error('User not found');
   }
@@ -232,9 +236,10 @@ async function placeBetWithTransaction(userId, roundId, amount) {
     throw new Error('Invalid round ID');
   }
 
-  const existingBet = await Bet.findOne({ userId, roundId });
+  const pIndex = Number(panelIndex) || 1;
+  const existingBet = await Bet.findOne({ userId, roundId, panelIndex: pIndex });
   if (existingBet) {
-    throw new Error('Bet already placed for this round');
+    throw new Error('Bet already placed for this panel in this round');
   }
 
   let session = null;
@@ -249,7 +254,7 @@ async function placeBetWithTransaction(userId, roundId, amount) {
     const newBalance = await adjustBalance(userId, -amount, {
       session,
       type: 'bet',
-      reference: String(roundId),
+      reference: `${roundId}-p${pIndex}`,
     });
 
     const betId = await createBet(
@@ -257,6 +262,7 @@ async function placeBetWithTransaction(userId, roundId, amount) {
         userId,
         roundId,
         amount,
+        panelIndex: pIndex,
         status: 'placed',
         cashOutMultiplier: null,
         payout: 0,

@@ -12,7 +12,7 @@ const {
 } = require('./gameState');
 const { emitAviator } = require('./socketService');
 
-async function placeBet(userId, amount, roundId) {
+async function placeBet(userId, amount, roundId, panelIndex = 1) {
   const round = getCurrentRound();
   const targetRoundId = roundId || round?.id;
   if (!round || round.id !== targetRoundId) {
@@ -28,17 +28,19 @@ async function placeBet(userId, amount, roundId) {
     throw new Error('A valid amount is required');
   }
 
-  const { betId, newBalance } = await placeBetWithTransaction(userId, round.id, numericAmount);
+  const pIndex = Number(panelIndex) || 1;
+  const { betId, newBalance } = await placeBetWithTransaction(userId, round.id, numericAmount, pIndex);
 
   emitAviator('aviator:bet', {
     roundId: round.id,
     amount: numericAmount,
+    panelIndex: pIndex,
   });
 
-  return { betId, roundId: round.id, amount: numericAmount, newBalance };
+  return { betId, roundId: round.id, amount: numericAmount, panelIndex: pIndex, newBalance };
 }
 
-async function cashOutBet(userId, roundId) {
+async function cashOutBet(userId, roundId, panelIndex = 1) {
   const round = getCurrentRound();
   const targetRoundId = roundId || round?.id;
   if (!round || round.id !== targetRoundId) {
@@ -49,7 +51,8 @@ async function cashOutBet(userId, roundId) {
     throw new Error('Cashout is only available during the flying phase');
   }
 
-  const bet = await getBetByUserAndRound(userId, round.id);
+  const pIndex = Number(panelIndex) || 1;
+  const bet = await getBetByUserAndRound(userId, round.id, pIndex);
   if (!bet || bet.status !== 'placed') {
     throw new Error('Bet not found');
   }
@@ -63,9 +66,10 @@ async function cashOutBet(userId, roundId) {
     roundId: round.id,
     multiplier,
     payout,
+    panelIndex: pIndex,
   });
 
-  return { payout, multiplier, newBalance };
+  return { payout, multiplier, panelIndex: pIndex, newBalance };
 }
 
 module.exports = {
