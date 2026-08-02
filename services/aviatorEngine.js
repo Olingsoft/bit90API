@@ -28,14 +28,14 @@ async function placeBet(userId, amount, roundId) {
     throw new Error('A valid amount is required');
   }
 
-  const betId = await placeBetWithTransaction(userId, round.id, numericAmount);
+  const { betId, newBalance } = await placeBetWithTransaction(userId, round.id, numericAmount);
 
   emitAviator('aviator:bet', {
     roundId: round.id,
     amount: numericAmount,
   });
 
-  return { betId, roundId: round.id, amount: numericAmount };
+  return { betId, roundId: round.id, amount: numericAmount, newBalance };
 }
 
 async function cashOutBet(userId, roundId) {
@@ -57,7 +57,7 @@ async function cashOutBet(userId, roundId) {
   const multiplier = round.multiplier || 1;
   const payout = Number(Number(bet.amount * multiplier).toFixed(2));
 
-  await cashOutWithTransaction(userId, round.id, bet.id, multiplier, payout);
+  const { newBalance } = await cashOutWithTransaction(userId, round.id, bet.id, multiplier, payout);
 
   emitAviator('aviator:cashout', {
     roundId: round.id,
@@ -65,7 +65,7 @@ async function cashOutBet(userId, roundId) {
     payout,
   });
 
-  return { payout, multiplier };
+  return { payout, multiplier, newBalance };
 }
 
 module.exports = {

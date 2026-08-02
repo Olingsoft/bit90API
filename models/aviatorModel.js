@@ -237,11 +237,16 @@ async function placeBetWithTransaction(userId, roundId, amount) {
     throw new Error('Bet already placed for this round');
   }
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  let session = null;
+  try {
+    session = await mongoose.startSession();
+    session.startTransaction();
+  } catch (e) {
+    session = null;
+  }
 
   try {
-    await adjustBalance(userId, -amount, {
+    const newBalance = await adjustBalance(userId, -amount, {
       session,
       type: 'bet',
       reference: String(roundId),
@@ -259,13 +264,13 @@ async function placeBetWithTransaction(userId, roundId, amount) {
       session
     );
 
-    await session.commitTransaction();
-    return betId;
+    if (session) await session.commitTransaction();
+    return { betId, newBalance };
   } catch (error) {
-    await session.abortTransaction();
+    if (session) await session.abortTransaction();
     throw error;
   } finally {
-    session.endSession();
+    if (session) session.endSession();
   }
 }
 
@@ -274,11 +279,16 @@ async function cashOutWithTransaction(userId, roundId, betId, multiplier, payout
     throw new Error('User not found');
   }
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  let session = null;
+  try {
+    session = await mongoose.startSession();
+    session.startTransaction();
+  } catch (e) {
+    session = null;
+  }
 
   try {
-    await adjustBalance(userId, payout, {
+    const newBalance = await adjustBalance(userId, payout, {
       session,
       type: 'cashout',
       reference: String(betId),
@@ -295,12 +305,13 @@ async function cashOutWithTransaction(userId, roundId, betId, multiplier, payout
       session
     );
 
-    await session.commitTransaction();
+    if (session) await session.commitTransaction();
+    return { payout, multiplier, newBalance };
   } catch (error) {
-    await session.abortTransaction();
+    if (session) await session.abortTransaction();
     throw error;
   } finally {
-    session.endSession();
+    if (session) session.endSession();
   }
 }
 
