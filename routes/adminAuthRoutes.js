@@ -1,6 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
-const { db, collection, getDocs, query, where, addDoc } = require('../firebase');
+const User = require('../models/User');
 
 const router = express.Router();
 
@@ -8,7 +8,6 @@ function isAdminUser(user) {
   return Boolean(user && (user.isAdmin === true || user.role === 'admin' || user.role === 'superadmin'));
 }
 
-// Frontend will handle rendering. These endpoints return status for frontend use.
 router.get('/login', (req, res) => {
   res.json({ message: 'Use frontend /admin/login to authenticate' });
 });
@@ -24,16 +23,10 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone and password are required' });
     }
 
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('phone', '==', phone));
-    const existingUsers = await getDocs(q);
-
-    if (existingUsers.empty) {
+    const user = await User.findOne({ phone });
+    if (!user) {
       return res.status(400).json({ success: false, message: 'Invalid phone or password' });
     }
-
-    const userDoc = existingUsers.docs[0];
-    const user = userDoc.data();
 
     if (user.password !== password) {
       return res.status(400).json({ success: false, message: 'Invalid phone or password' });
@@ -44,7 +37,7 @@ router.post('/login', async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: userDoc.id, phone: user.phone, isAdmin: true, role: user.role || 'admin' },
+      { id: String(user._id), phone: user.phone, isAdmin: true, role: user.role || 'admin' },
       process.env.JWT_SECRET || 'default_jwt_secret',
       { expiresIn: '1h' }
     );
@@ -72,27 +65,21 @@ router.post('/signup', async (req, res) => {
       return res.status(403).json({ success: false, message: 'Invalid signup secret' });
     }
 
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('phone', '==', phone));
-    const existingUsers = await getDocs(q);
-
-    if (!existingUsers.empty) {
+    const existingUser = await User.findOne({ phone });
+    if (existingUser) {
       return res.status(400).json({ success: false, message: 'Phone already exists' });
     }
 
-    const userData = {
+    const user = await User.create({
       phone,
       password,
       balance: 0,
       isAdmin: true,
       role: 'admin',
-      createdAt: new Date().toISOString()
-    };
-
-    const docRef = await addDoc(usersRef, userData);
+    });
 
     const token = jwt.sign(
-      { id: docRef.id, phone: userData.phone, isAdmin: true, role: 'admin' },
+      { id: String(user._id), phone: user.phone, isAdmin: true, role: 'admin' },
       process.env.JWT_SECRET || 'default_jwt_secret',
       { expiresIn: '1h' }
     );
@@ -105,10 +92,9 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-module.exports = router;
-
-// logout helper
 router.get('/logout', (req, res) => {
   res.clearCookie('admin_token');
   res.json({ success: true });
 });
+
+module.exports = router;
