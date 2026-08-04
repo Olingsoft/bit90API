@@ -9,6 +9,8 @@ const {
   getCrashRange,
   setCrashRange,
   getCurrentRound,
+  loadGameConfig,
+  invalidateConfigCache,
 } = require('./gameState');
 const { emitAviator } = require('./socketService');
 
@@ -79,4 +81,6 @@ module.exports = {
   getCrashQueue,
   getCrashRange,
   setCrashRange,
+  loadGameConfig,
+  invalidateConfigCache,
 };

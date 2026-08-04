@@ -4,7 +4,8 @@ const roundSchema = new mongoose.Schema(
   {
     hash: {
       type: String,
-      required: true,
+      required: false,   // null in auto mode (no seed-based hash)
+      default: null,
       trim: true,
     },
     serverSeed: {
@@ -43,6 +44,19 @@ const roundSchema = new mongoose.Schema(
     },
     revealedAt: {
       type: Date,
+      default: null,
+    },
+    // Populated only for auto-mode rounds — records which band produced
+    // the crash point, e.g. "extra_low", "high", "super_extreme".
+    crashBand: {
+      type: String,
+      default: null,
+    },
+    // Records whether this round ran in "auto" or "manual" mode.
+    // Useful for audit queries and analytics.
+    crashMode: {
+      type: String,
+      enum: ['auto', 'manual', null],
       default: null,
     },
   },

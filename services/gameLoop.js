@@ -99,13 +99,15 @@ async function crashRound() {
   setCurrentRound(round);
 
   await updateRound(round.id, {
-    phase: round.phase,
-    status: round.status,
+    phase:      round.phase,
+    status:     round.status,
     crashPoint: round.crashPoint,
     multiplier: round.crashPoint,
-    crashedAt: round.crashedAt,
+    crashedAt:  round.crashedAt,
     serverSeed: round.serverSeed,
     revealedAt: round.revealedAt,
+    crashBand:  round.crashBand  ?? null,
+    crashMode:  round.crashMode  ?? null,
   });
 
   emitAviator('aviator:crashed', {
@@ -133,33 +135,37 @@ async function startNewRound() {
   clearCountdownInterval();
   clearFlightInterval();
 
-  const threshold = getNextCrashThreshold();
+  const threshold = await getNextCrashThreshold();
   const startedAt = new Date().toISOString();
   const roundData = {
-    hash: threshold.hash,
+    hash:       threshold.hash,
     serverSeed: null,
     crashPoint: null,
-    status: 'waiting',
-    phase: 'waiting',
-    countdown: ROUND_WAIT_SECONDS,
+    status:     'waiting',
+    phase:      'waiting',
+    countdown:  ROUND_WAIT_SECONDS,
     multiplier: 1,
     startedAt,
+    crashBand:  threshold.crashBand,
+    crashMode:  threshold.crashMode,
   };
   const roundId = await createRound(roundData);
 
   const round = {
-    id: roundId,
-    hash: threshold.hash,
-    serverSeed: threshold.serverSeed,
-    crashPoint: null,
+    id:                roundId,
+    hash:              threshold.hash,
+    serverSeed:        threshold.serverSeed,
+    crashPoint:        null,
     pendingCrashPoint: threshold.crashPoint,
-    status: 'waiting',
-    phase: 'waiting',
-    multiplier: 1,
-    countdown: ROUND_WAIT_SECONDS,
+    status:            'waiting',
+    phase:             'waiting',
+    multiplier:        1,
+    countdown:         ROUND_WAIT_SECONDS,
     startedAt,
-    crashedAt: null,
-    revealedAt: null,
+    crashedAt:         null,
+    revealedAt:        null,
+    crashBand:         threshold.crashBand,
+    crashMode:         threshold.crashMode,
   };
   setCurrentRound(round);
 
