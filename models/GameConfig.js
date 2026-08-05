@@ -8,16 +8,16 @@ const mongoose = require('mongoose');
 // Admin can override any value via PUT /admin/config.
 // ─────────────────────────────────────────────────────────────────────────────
 const DEFAULT_BAND_WEIGHTS = {
-  extra_low: 54,   // 1.00–1.90  — ~36.5% of rounds (54/148 total weight)
-  low: 32,         // 1.00–2.00  — slightly reduced from 40
-  low_mid: 24,     // 1.00–4.00  — boosted from 18
-  mid: 18,         // 1.00–5.00  — boosted from 12
-  mid_high: 8,     // 1.00–7.00
-  high: 5,         // 1.00–15.0
-  extra_high: 3,   // 1.00–30.0
-  super_high: 2,   // 1.00–50.0
-  extreme: 1.2,    // 1.00–90.0
-  super_extreme: 0.8, // 1.00–150.0 — rarest
+  extra_low:    28,   // 1.00–1.90  ~22%
+  low:          28,   // 1.00–2.00  ~22%
+  low_mid:      26,   // 1.00–4.00  ~21%
+  mid:          20,   // 1.00–5.00  ~16%
+  mid_high:     10,   // 1.00–7.00   ~8%
+  high:          6,   // 1.00–15.0   ~5%
+  extra_high:    3,   // 1.00–30.0  ~2.4%
+  super_high:    2,   // 1.00–50.0  ~1.6%
+  extreme:       1.2, // 1.00–90.0   ~1%
+  super_extreme: 0.8, // 1.00–150.0 ~0.6%
 };
 
 const bandWeightSchema = new mongoose.Schema(
