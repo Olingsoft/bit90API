@@ -81,7 +81,7 @@ async function getRound(roundId) {
 }
 
 async function listRounds(limitCount = 20) {
-  const rounds = await Round.find()
+  const rounds = await Round.find({ status: 'crashed' })  // only completed rounds
     .sort({ createdAt: -1 })
     .limit(limitCount)
     .lean();

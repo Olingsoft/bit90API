@@ -19,7 +19,7 @@ const { GameConfig } = require('../models/GameConfig');
 //   mid_high   10/125 =  8%
 //   high+       ~11%  split across remaining bands
 const NEW_WEIGHTS = {
-  extra_low: 24,   // 1.00–1.90  ~22%
+  extra_low: 28,   // 1.00–1.90  ~22%
   low: 28,   // 1.00–2.00  ~22%
   low_mid: 26,   // 1.00–4.00  ~21%
   mid: 20,   // 1.00–5.00  ~16%
