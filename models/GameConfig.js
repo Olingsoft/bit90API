@@ -8,15 +8,15 @@ const mongoose = require('mongoose');
 // Admin can override any value via PUT /admin/config.
 // ─────────────────────────────────────────────────────────────────────────────
 const DEFAULT_BAND_WEIGHTS = {
-  extra_low: 68,   // 1.00–1.90  — most common
-  low: 40,   // 1.00–2.00
-  low_mid: 18,   // 1.00–4.00
-  mid: 12,   // 1.00–5.00
-  mid_high: 8,   // 1.00–7.00
-  high: 5,   // 1.00–15.0
+  extra_low: 38,   // 1.00–1.90  — reduced from 68 (less instant crashes)
+  low: 32,         // 1.00–2.00  — slightly reduced from 40
+  low_mid: 24,     // 1.00–4.00  — boosted from 18
+  mid: 18,         // 1.00–5.00  — boosted from 12
+  mid_high: 8,     // 1.00–7.00
+  high: 5,         // 1.00–15.0
   extra_high: 3,   // 1.00–30.0
   super_high: 2,   // 1.00–50.0
-  extreme: 1.2, // 1.00–90.0
+  extreme: 1.2,    // 1.00–90.0
   super_extreme: 0.8, // 1.00–150.0 — rarest
 };
 
