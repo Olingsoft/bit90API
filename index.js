@@ -24,6 +24,8 @@ const app = express();
 // ─────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
   'https://bit90.vercel.app',
+  // Production server frontend (same machine, different port)
+  'http://102.68.86.20:3000',
   // Add preview/branch deployments when needed:
   // 'https://bit90-git-branch-yourteam.vercel.app',
 ];
