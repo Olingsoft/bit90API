@@ -8,7 +8,7 @@ const mongoose = require('mongoose');
 // Admin can override any value via PUT /admin/config.
 // ─────────────────────────────────────────────────────────────────────────────
 const DEFAULT_BAND_WEIGHTS = {
-  extra_low: 38,   // 1.00–1.90  — reduced from 68 (less instant crashes)
+  extra_low: 54,   // 1.00–1.90  — ~36.5% of rounds (54/148 total weight)
   low: 32,         // 1.00–2.00  — slightly reduced from 40
   low_mid: 24,     // 1.00–4.00  — boosted from 18
   mid: 18,         // 1.00–5.00  — boosted from 12
