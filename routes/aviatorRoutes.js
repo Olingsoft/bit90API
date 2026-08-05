@@ -1,7 +1,7 @@
 const express = require('express');
 const { authMiddleware } = require('../middleware/auth');
 const { placeBet, cashOutBet, getPublicState, getCrashQueue } = require('../services/aviatorEngine');
-const { listRounds } = require('../models/aviatorModel');
+const { listRounds, getUserBets, getTopBets, getRoundBets } = require('../models/aviatorModel');
 
 const router = express.Router();
 
@@ -26,6 +26,33 @@ router.get('/history', async (req, res) => {
     res.json(rounds);
   } catch (error) {
     res.status(500).json({ message: 'Unable to fetch aviator history', error: error.message });
+  }
+});
+
+router.get('/my-bets', authMiddleware, async (req, res) => {
+  try {
+    const bets = await getUserBets(req.user.id, 30);
+    res.json(bets);
+  } catch (error) {
+    res.status(500).json({ message: 'Unable to fetch user bets', error: error.message });
+  }
+});
+
+router.get('/top-bets', async (req, res) => {
+  try {
+    const top = await getTopBets(20);
+    res.json(top);
+  } catch (error) {
+    res.status(500).json({ message: 'Unable to fetch top bets', error: error.message });
+  }
+});
+
+router.get('/round-bets/:roundId', async (req, res) => {
+  try {
+    const bets = await getRoundBets(req.params.roundId);
+    res.json(bets);
+  } catch (error) {
+    res.status(500).json({ message: 'Unable to fetch round bets', error: error.message });
   }
 });
 

@@ -2,7 +2,9 @@ const {
   getBetByUserAndRound,
   placeBetWithTransaction,
   cashOutWithTransaction,
+  formatMaskedPhone,
 } = require('../models/aviatorModel');
+const User = require('../models/User');
 const {
   getPublicState,
   getCrashQueue,
@@ -33,10 +35,14 @@ async function placeBet(userId, amount, roundId, panelIndex = 1) {
   const pIndex = Number(panelIndex) || 1;
   const { betId, newBalance } = await placeBetWithTransaction(userId, round.id, numericAmount, pIndex);
 
+  const userDoc = await User.findById(userId).select('phone').lean();
+  const maskedPhone = userDoc?.phone ? formatMaskedPhone(userDoc.phone) : '0712***21';
+
   emitAviator('aviator:bet', {
     roundId: round.id,
     amount: numericAmount,
     panelIndex: pIndex,
+    username: maskedPhone,
   });
 
   return { betId, roundId: round.id, amount: numericAmount, panelIndex: pIndex, newBalance };
@@ -64,11 +70,15 @@ async function cashOutBet(userId, roundId, panelIndex = 1) {
 
   const { newBalance } = await cashOutWithTransaction(userId, round.id, bet.id, multiplier, payout);
 
+  const userDoc = await User.findById(userId).select('phone').lean();
+  const maskedPhone = userDoc?.phone ? formatMaskedPhone(userDoc.phone) : '0712***21';
+
   emitAviator('aviator:cashout', {
     roundId: round.id,
     multiplier,
     payout,
     panelIndex: pIndex,
+    username: maskedPhone,
   });
 
   return { payout, multiplier, panelIndex: pIndex, newBalance };

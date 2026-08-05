@@ -321,6 +321,75 @@ async function cashOutWithTransaction(userId, roundId, betId, multiplier, payout
   }
 }
 
+function formatMaskedPhone(phone) {
+  if (!phone) return '0712***21';
+  let digits = String(phone).replace(/\D/g, '');
+  if (digits.startsWith('254') && digits.length === 12) {
+    digits = '0' + digits.slice(3);
+  }
+  if (digits.length >= 9) {
+    const start = digits.slice(0, 4);
+    const end = digits.slice(-2);
+    return `${start}***${end}`;
+  }
+  return `${digits.slice(0, 3)}***${digits.slice(-2)}`;
+}
+
+async function getUserBets(userId, limitCount = 30) {
+  if (!isValidObjectId(userId)) return [];
+  const bets = await Bet.find({ userId })
+    .sort({ createdAt: -1 })
+    .limit(limitCount)
+    .lean();
+
+  return bets.map((b) => ({
+    id: String(b._id),
+    roundId: String(b.roundId),
+    panelIndex: b.panelIndex || 1,
+    amount: b.amount,
+    cashedOutAt: b.cashOutMultiplier || null,
+    payout: b.payout || null,
+    status: b.status,
+    createdAt: b.createdAt ? new Date(b.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+  }));
+}
+
+async function getTopBets(limitCount = 20) {
+  const bets = await Bet.find({ status: 'cashed_out' })
+    .populate('userId', 'phone')
+    .sort({ payout: -1 })
+    .limit(limitCount)
+    .lean();
+
+  return bets.map((b, idx) => ({
+    rank: idx + 1,
+    user: b.userId?.phone ? formatMaskedPhone(b.userId.phone) : '0712***21',
+    bet: b.amount,
+    mult: b.cashOutMultiplier || 1,
+    payout: b.payout || 0,
+    date: b.createdAt ? new Date(b.createdAt).toLocaleDateString() : 'Today',
+  }));
+}
+
+async function getRoundBets(roundId) {
+  if (!isValidObjectId(roundId)) return [];
+  const bets = await Bet.find({ roundId })
+    .populate('userId', 'phone')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return bets.map((b) => ({
+    id: String(b._id),
+    username: b.userId?.phone ? formatMaskedPhone(b.userId.phone) : '0712***21',
+    amount: b.amount,
+    cashedOut: b.status === 'cashed_out',
+    cashedOutAt: b.cashOutMultiplier || undefined,
+    payout: b.payout || undefined,
+    status: b.status,
+    panelIndex: b.panelIndex || 1,
+  }));
+}
+
 module.exports = {
   createRound,
   updateRound,
@@ -333,5 +402,10 @@ module.exports = {
   adjustBalance,
   placeBetWithTransaction,
   cashOutWithTransaction,
+  getUserBets,
+  getTopBets,
+  getRoundBets,
+  formatMaskedPhone,
   isValidObjectId,
 };
+
