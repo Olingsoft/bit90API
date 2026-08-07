@@ -1,6 +1,6 @@
 'use strict';
 
-const express              = require('express');
+const express = require('express');
 const { adminAuthMiddleware } = require('../middleware/auth');
 const {
   getPublicState,
@@ -9,9 +9,10 @@ const {
   setCrashRange,
   invalidateConfigCache,
   loadGameConfig,
-}                          = require('../services/aviatorEngine');
+} = require('../services/aviatorEngine');
 const { GameConfig, DEFAULT_BAND_WEIGHTS } = require('../models/GameConfig');
-const { BANDS }            = require('../services/crashGenerator');
+const { BANDS } = require('../services/crashGenerator');
+const { requireSuperAdmin } = require('../middleware/rbac');
 
 const router = express.Router();
 
@@ -42,6 +43,12 @@ router.get('/', adminAuthMiddleware, async (req, res) => {
     const crashRange   = getCrashRange();
     const game_config  = await loadGameConfig();
 
+    const rawRole = req.user?.role || 'admin';
+    const adminRole =
+      rawRole === 'superadmin' || rawRole === 'super_admin'
+        ? 'super_admin'
+        : rawRole;
+
     return res.json({
       title: 'Aviator Admin Dashboard',
       publicState,
@@ -51,6 +58,11 @@ router.get('/', adminAuthMiddleware, async (req, res) => {
         crash_mode:   game_config.crash_mode,
         rtp_param:    game_config.rtp_param,
         band_weights: game_config.band_weights,
+      },
+      admin: {
+        id: req.user?.id || null,
+        phone: req.user?.phone || null,
+        role: adminRole,
       },
       available_bands: BANDS.map((b) => ({
         name:    b.name,
@@ -88,7 +100,8 @@ router.get('/config', adminAuthMiddleware, async (req, res) => {
 // ─── PUT /admin/config ────────────────────────────────────────────────────────
 // Update crash_mode, rtp_param, and/or band_weights (partial updates OK).
 // Changes take effect on the NEXT round start (not mid-flight).
-router.put('/config', adminAuthMiddleware, async (req, res) => {
+// SUPER ADMIN ONLY - This is the highest privilege feature for game configuration
+router.put('/config', adminAuthMiddleware, requireSuperAdmin, async (req, res) => {
   try {
     const { crash_mode, rtp_param, band_weights } = req.body;
     const update = {};
@@ -152,7 +165,8 @@ router.put('/config', adminAuthMiddleware, async (req, res) => {
 
 // ─── PUT /admin/crash-range ───────────────────────────────────────────────────
 // Existing manual crash-range endpoint — unchanged.
-router.put('/crash-range', adminAuthMiddleware, (req, res) => {
+// SUPER ADMIN ONLY - Manual crash point control is a high privilege feature
+router.put('/crash-range', adminAuthMiddleware, requireSuperAdmin, (req, res) => {
   try {
     const min         = Number(req.body.min);
     const max         = Number(req.body.max);

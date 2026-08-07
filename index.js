@@ -9,6 +9,7 @@ const userRoutes = require('./routes/userRoutes');
 const aviatorRoutes = require('./routes/aviatorRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const adminAuthRoutes = require('./routes/adminAuthRoutes');
+const adminManagementRoutes = require('./routes/adminManagementRoutes');
 const { connectMongo } = require('./config/mongodb');
 const { startRoundLoop } = require('./services/gameLoop');
 const { initSocket } = require('./services/socketService');
@@ -109,6 +110,7 @@ app.use('/users', userRoutes);
 app.use('/aviator', aviatorRoutes);
 app.use('/admin', adminAuthRoutes);
 app.use('/admin', adminRoutes);
+app.use('/admin', adminManagementRoutes);
 
 // ─────────────────────────────────────────────
 // Global error handler — MUST come after routes.
