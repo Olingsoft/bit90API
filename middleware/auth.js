@@ -1,4 +1,6 @@
 const jwt = require('jsonwebtoken');
+const Admin = require('../models/Admin');
+const User = require('../models/User');
 
 function getTokenFromRequest(req) {
   const header = req.headers.authorization || '';
@@ -25,7 +27,7 @@ function authMiddleware(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_jwt_secret');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
     req.user = decoded;
     next();
   } catch (error) {
@@ -33,7 +35,7 @@ function authMiddleware(req, res, next) {
   }
 }
 
-function adminAuthMiddleware(req, res, next) {
+async function adminAuthMiddleware(req, res, next) {
   const token = getTokenFromRequest(req);
 
   if (!token) {
@@ -41,11 +43,44 @@ function adminAuthMiddleware(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_jwt_secret');
-    if (!decoded || !(decoded.isAdmin === true || decoded.role === 'admin' || decoded.role === 'superadmin')) {
-      return res.status(403).json({ message: 'Admin access required' });
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    
+    // First try to find in new Admin model
+    let admin = await Admin.findById(decoded.id);
+    
+    // If not found in Admin model, try old User model for backward compatibility
+    if (!admin) {
+      const user = await User.findById(decoded.id);
+      if (user && (user.isAdmin === true || user.role === 'admin' || user.role === 'superadmin')) {
+        // Create a temporary admin-like object from the user
+        admin = {
+          _id: user._id,
+          phone: user.phone,
+          role: user.role === 'superadmin' ? 'super_admin' : 'admin',
+          fullName: user.username || user.phone,
+          email: user.email || `${user.phone}@bit90.com`,
+          status: 'active'
+        };
+      }
     }
-    req.user = decoded;
+    
+    if (!admin) {
+      return res.status(401).json({ message: 'Admin not found' });
+    }
+    
+    if (admin.status !== 'active') {
+      return res.status(403).json({ message: 'Admin account is not active' });
+    }
+    
+    // Add admin details to request
+    req.user = {
+      id: admin._id,
+      phone: admin.phone,
+      role: admin.role,
+      fullName: admin.fullName,
+      email: admin.email
+    };
+    
     next();
   } catch (error) {
     return res.status(401).json({ message: 'Invalid or expired token' });

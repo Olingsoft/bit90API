@@ -1,6 +1,7 @@
 'use strict';
 
 const Admin = require('../models/Admin');
+const User = require('../models/User');
 
 /**
  * Check if admin has required permission
@@ -40,7 +41,21 @@ const requirePermission = (permission) => {
         return res.status(401).json({ message: 'Authentication required' });
       }
       
-      const admin = await Admin.findById(req.user.id).select('role permissions');
+      let admin = await Admin.findById(req.user.id).select('role permissions status');
+      
+      // If not found in Admin model, try old User model for backward compatibility
+      if (!admin) {
+        const user = await User.findById(req.user.id);
+        if (user && (user.isAdmin === true || user.role === 'admin' || user.role === 'superadmin')) {
+          // Create a temporary admin-like object from the user
+          admin = {
+            _id: user._id,
+            role: user.role === 'superadmin' ? 'super_admin' : 'admin',
+            status: 'active',
+            permissions: [] // Old users don't have specific permissions, but superadmin has all
+          };
+        }
+      }
       
       if (!admin) {
         return res.status(404).json({ message: 'Admin not found' });
@@ -76,7 +91,21 @@ const requireAnyPermission = (permissions) => {
         return res.status(401).json({ message: 'Authentication required' });
       }
       
-      const admin = await Admin.findById(req.user.id).select('role permissions');
+      let admin = await Admin.findById(req.user.id).select('role permissions status');
+      
+      // If not found in Admin model, try old User model for backward compatibility
+      if (!admin) {
+        const user = await User.findById(req.user.id);
+        if (user && (user.isAdmin === true || user.role === 'admin' || user.role === 'superadmin')) {
+          // Create a temporary admin-like object from the user
+          admin = {
+            _id: user._id,
+            role: user.role === 'superadmin' ? 'super_admin' : 'admin',
+            status: 'active',
+            permissions: [] // Old users don't have specific permissions, but superadmin has all
+          };
+        }
+      }
       
       if (!admin) {
         return res.status(404).json({ message: 'Admin not found' });
@@ -112,7 +141,20 @@ const requireRole = (roles) => {
         return res.status(401).json({ message: 'Authentication required' });
       }
       
-      const admin = await Admin.findById(req.user.id).select('role status');
+      let admin = await Admin.findById(req.user.id).select('role status');
+      
+      // If not found in Admin model, try old User model for backward compatibility
+      if (!admin) {
+        const user = await User.findById(req.user.id);
+        if (user && (user.isAdmin === true || user.role === 'admin' || user.role === 'superadmin')) {
+          // Create a temporary admin-like object from the user
+          admin = {
+            _id: user._id,
+            role: user.role === 'superadmin' ? 'super_admin' : 'admin',
+            status: 'active'
+          };
+        }
+      }
       
       if (!admin) {
         return res.status(404).json({ message: 'Admin not found' });
