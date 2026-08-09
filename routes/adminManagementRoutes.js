@@ -1,3 +1,4 @@
+
 'use strict';
 
 const express = require('express');
@@ -67,7 +68,7 @@ router.get('/users/:userId/referral-info', adminAuthMiddleware, canManageUsers, 
 
 // ─── Admin Management Routes (Super Admin Only) ────────────────────────────
 
-router.get('/admins', adminAuthMiddleware, requireSuperAdmin, adminUserController.getAllAdmins);
+router.get('/admins', adminAuthMiddleware, adminUserController.getAllAdmins);
 router.put('/admins/:adminId/role', adminAuthMiddleware, requireSuperAdmin, adminUserController.updateAdminRole);
 
 // ─── KYC Management Routes ───────────────────────────────────────────────────

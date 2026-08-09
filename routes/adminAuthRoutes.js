@@ -64,9 +64,9 @@ router.post('/login', async (req, res) => {
 
 router.post('/signup', async (req, res) => {
   try {
-    const { phone, password, secret } = req.body;
-    if (!phone || !password || !secret) {
-      return res.status(400).json({ success: false, message: 'Phone, password and signup secret are required' });
+    const { fullName, username, phone, email, password, secret } = req.body;
+    if (!fullName || !username || !phone || !password || !secret) {
+      return res.status(400).json({ success: false, message: 'Full name, username, phone, password and signup secret are required' });
     }
 
     const signupSecret = process.env.ADMIN_SIGNUP_SECRET;
@@ -83,17 +83,19 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone already exists' });
     }
 
+    const existingUsername = await Admin.findOne({ username });
+    if (existingUsername) {
+      return res.status(400).json({ success: false, message: 'Username already exists' });
+    }
+
     // Check if this is the first admin
     const adminCount = await Admin.countDocuments();
     const isFirstAdmin = adminCount === 0;
 
-    // Generate valid username from phone (remove special characters)
-    const username = phone.replace(/[^a-zA-Z0-9_]/g, '');
-
     const admin = await Admin.create({
-      fullName: 'Admin',
-      username: username,
-      email: `${phone}@bit90.com`,
+      fullName,
+      username,
+      email: email || `${phone}@bit90.com`,
       phoneNumber: phone,
       password,
       role: isFirstAdmin ? 'super_admin' : 'unassigned',

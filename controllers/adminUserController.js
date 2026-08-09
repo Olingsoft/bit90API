@@ -467,13 +467,14 @@ const getAllAdmins = async (req, res) => {
       sortOrder = 'desc'
     } = req.query;
 
-    const query = { isAdmin: true };
+    const query = {};
     
     if (search) {
       query.$or = [
+        { fullName: { $regex: search, $options: 'i' } },
         { username: { $regex: search, $options: 'i' } },
         { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } }
+        { phoneNumber: { $regex: search, $options: 'i' } }
       ];
     }
 
@@ -484,13 +485,13 @@ const getAllAdmins = async (req, res) => {
     const skip = (page - 1) * limit;
     const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
-    const admins = await User.find(query)
+    const admins = await Admin.find(query)
       .sort(sort)
       .skip(skip)
       .limit(limit)
-      .select('-password');
+      .select('-password -twoFactorSecret -passwordResetToken');
 
-    const total = await User.countDocuments(query);
+    const total = await Admin.countDocuments(query);
 
     res.json({
       admins,
@@ -524,14 +525,10 @@ const updateAdminRole = async (req, res) => {
       return res.status(400).json({ message: 'Invalid role' });
     }
 
-    const admin = await User.findById(adminId);
+    const admin = await Admin.findById(adminId);
 
     if (!admin) {
       return res.status(404).json({ message: 'Admin not found' });
-    }
-
-    if (!admin.isAdmin) {
-      return res.status(404).json({ message: 'User is not an admin' });
     }
 
     // Prevent super admin from changing their own role
@@ -541,12 +538,13 @@ const updateAdminRole = async (req, res) => {
 
     const oldRole = admin.role;
     admin.role = role;
+    admin.updatedBy = req.user.id;
     await admin.save();
 
     // Log audit
     await auditLogService.log({
       admin: req.user.id,
-      adminName: req.user.username || req.user.phone,
+      adminName: req.user.fullName || req.user.username,
       adminRole: req.user.role,
       action: 'update_admin_role',
       actionDetails: `Changed role from ${oldRole} to ${role}`,
