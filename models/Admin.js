@@ -40,13 +40,13 @@ const adminSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Phone number is required'],
     trim: true,
-    match: [/^\+?[1-9]\d{1,14}$/, 'Please provide a valid phone number']
+    match: [/^\+?[0-9]\d{6,14}$/, 'Please provide a valid phone number']
   },
 
   // Role & Permissions
   role: {
     type: String,
-    enum: ['super_admin', 'finance_admin', 'support_admin', 'kyc_admin', 'marketing_admin', 'system_admin'],
+    enum: ['super_admin', 'finance_admin', 'support_admin', 'kyc_admin', 'marketing_admin', 'system_admin', 'unassigned'],
     default: 'support_admin',
     required: true
   },

@@ -453,6 +453,119 @@ const getUserReferralInfo = async (req, res) => {
   }
 };
 
+/**
+ * Get all admins (super admin only)
+ */
+const getAllAdmins = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      search,
+      role,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
+
+    const query = { isAdmin: true };
+    
+    if (search) {
+      query.$or = [
+        { username: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (role) {
+      query.role = role;
+    }
+
+    const skip = (page - 1) * limit;
+    const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+
+    const admins = await User.find(query)
+      .sort(sort)
+      .skip(skip)
+      .limit(limit)
+      .select('-password');
+
+    const total = await User.countDocuments(query);
+
+    res.json({
+      admins,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        totalAdmins: total,
+        perPage: limit
+      }
+    });
+  } catch (error) {
+    console.error('[Admin User] Get all admins error:', error);
+    res.status(500).json({ message: 'Failed to get admins' });
+  }
+};
+
+/**
+ * Update admin role (super admin only)
+ */
+const updateAdminRole = async (req, res) => {
+  try {
+    const { adminId } = req.params;
+    const { role } = req.body;
+
+    if (!role) {
+      return res.status(400).json({ message: 'Role is required' });
+    }
+
+    const validRoles = ['super_admin', 'finance_admin', 'support_admin', 'kyc_admin', 'marketing_admin', 'system_admin', 'unassigned'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ message: 'Invalid role' });
+    }
+
+    const admin = await User.findById(adminId);
+
+    if (!admin) {
+      return res.status(404).json({ message: 'Admin not found' });
+    }
+
+    if (!admin.isAdmin) {
+      return res.status(404).json({ message: 'User is not an admin' });
+    }
+
+    // Prevent super admin from changing their own role
+    if (admin._id.toString() === req.user.id && role !== 'super_admin') {
+      return res.status(403).json({ message: 'Cannot change your own role from super admin' });
+    }
+
+    const oldRole = admin.role;
+    admin.role = role;
+    await admin.save();
+
+    // Log audit
+    await auditLogService.log({
+      admin: req.user.id,
+      adminName: req.user.username || req.user.phone,
+      adminRole: req.user.role,
+      action: 'update_admin_role',
+      actionDetails: `Changed role from ${oldRole} to ${role}`,
+      targetType: 'admin',
+      targetId: adminId,
+      targetUser: adminId,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+      browser: req.headers['user-agent'],
+      device: req.headers['user-agent']
+    });
+
+    res.json({ message: 'Admin role updated successfully', admin });
+  } catch (error) {
+    console.error('[Admin User] Update admin role error:', error);
+    res.status(500).json({ message: 'Failed to update admin role' });
+  }
+};
+
 module.exports = {
   getAllUsers,
   getUserById,
@@ -465,5 +578,7 @@ module.exports = {
   getUserDeposits,
   getUserWithdrawals,
   getUserLoginHistory,
-  getUserReferralInfo
+  getUserReferralInfo,
+  getAllAdmins,
+  updateAdminRole
 };

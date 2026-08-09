@@ -65,6 +65,11 @@ router.get('/users/:userId/withdrawals', adminAuthMiddleware, canManageUsers, ad
 router.get('/users/:userId/login-history', adminAuthMiddleware, canManageUsers, adminUserController.getUserLoginHistory);
 router.get('/users/:userId/referral-info', adminAuthMiddleware, canManageUsers, adminUserController.getUserReferralInfo);
 
+// ─── Admin Management Routes (Super Admin Only) ────────────────────────────
+
+router.get('/admins', adminAuthMiddleware, requireSuperAdmin, adminUserController.getAllAdmins);
+router.put('/admins/:adminId/role', adminAuthMiddleware, requireSuperAdmin, adminUserController.updateAdminRole);
+
 // ─── KYC Management Routes ───────────────────────────────────────────────────
 
 router.get('/kyc', adminAuthMiddleware, canAccessKYC, kycController.getAllKYC);

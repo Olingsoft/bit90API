@@ -19,49 +19,31 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone and password are required' });
     }
 
-    // First try to find in new Admin model
-    let admin = await Admin.findOne({ phone }).select('+password');
-    let role = 'admin';
+    // Find admin in Admin model by phoneNumber
+    const admin = await Admin.findOne({ phoneNumber: phone }).select('+password');
 
-    if (admin) {
-      if (admin.status !== 'active') {
-        return res.status(403).json({ success: false, message: 'Admin account is not active' });
-      }
-
-      if (admin.isLocked()) {
-        return res.status(423).json({ success: false, message: 'Account is temporarily locked' });
-      }
-
-      const isPasswordValid = await admin.comparePassword(password);
-      if (!isPasswordValid) {
-        await admin.incrementFailedLogin();
-        return res.status(400).json({ success: false, message: 'Invalid phone or password' });
-      }
-
-      await admin.resetFailedLogin();
-      role = admin.role;
-    } else {
-      // Try old User model for backward compatibility
-      const user = await User.findOne({ phone });
-      if (!user) {
-        return res.status(400).json({ success: false, message: 'Invalid phone or password' });
-      }
-
-      if (!(user.isAdmin === true || user.role === 'admin' || user.role === 'superadmin')) {
-        return res.status(403).json({ success: false, message: 'Admin access required' });
-      }
-
-      // Old User model stores password in plain text (not hashed)
-      if (user.password !== password) {
-        return res.status(400).json({ success: false, message: 'Invalid phone or password' });
-      }
-
-      role = user.role === 'superadmin' ? 'super_admin' : 'admin';
-      admin = user;
+    if (!admin) {
+      return res.status(400).json({ success: false, message: 'Invalid phone or password' });
     }
 
+    if (admin.status !== 'active') {
+      return res.status(403).json({ success: false, message: 'Admin account is not active' });
+    }
+
+    if (admin.isLocked()) {
+      return res.status(423).json({ success: false, message: 'Account is temporarily locked' });
+    }
+
+    const isPasswordValid = await admin.comparePassword(password);
+    if (!isPasswordValid) {
+      await admin.incrementFailedLogin();
+      return res.status(400).json({ success: false, message: 'Invalid phone or password' });
+    }
+
+    await admin.resetFailedLogin();
+
     const token = require('jsonwebtoken').sign(
-      { id: admin._id, phone: admin.phone, role: role },
+      { id: admin._id, phone: admin.phoneNumber, role: admin.role },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
@@ -96,24 +78,31 @@ router.post('/signup', async (req, res) => {
       return res.status(403).json({ success: false, message: 'Invalid signup secret' });
     }
 
-    const existingAdmin = await Admin.findOne({ phone });
+    const existingAdmin = await Admin.findOne({ phoneNumber: phone });
     if (existingAdmin) {
       return res.status(400).json({ success: false, message: 'Phone already exists' });
     }
 
+    // Check if this is the first admin
+    const adminCount = await Admin.countDocuments();
+    const isFirstAdmin = adminCount === 0;
+
+    // Generate valid username from phone (remove special characters)
+    const username = phone.replace(/[^a-zA-Z0-9_]/g, '');
+
     const admin = await Admin.create({
       fullName: 'Admin',
-      username: phone,
+      username: username,
       email: `${phone}@bit90.com`,
-      phone,
+      phoneNumber: phone,
       password,
-      role: 'super_admin',
+      role: isFirstAdmin ? 'super_admin' : 'unassigned',
       status: 'active',
       createdBy: null
     });
 
     const token = require('jsonwebtoken').sign(
-      { id: admin._id, phone: admin.phone, role: admin.role },
+      { id: admin._id, phone: admin.phoneNumber, role: admin.role },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
@@ -125,7 +114,7 @@ router.post('/signup', async (req, res) => {
       secure: false
     });
 
-    res.json({ success: true, token });
+    res.json({ success: true, token, admin: { id: admin._id, role: admin.role, isFirstAdmin } });
   } catch (error) {
     console.error('Admin signup failed', error);
     res.status(500).json({ success: false, message: 'Signup failed' });
