@@ -11,7 +11,7 @@ const hasPermission = (admin, requiredPermission) => {
   if (admin.role === 'super_admin') {
     return true;
   }
-  
+
   // Check if admin has the specific permission
   return admin.permissions && admin.permissions.includes(requiredPermission);
 };

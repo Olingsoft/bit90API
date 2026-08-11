@@ -4,6 +4,35 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
+// Role-based permissions mapping
+const ROLE_PERMISSIONS = {
+  super_admin: [
+    'view_dashboard', 'view_users', 'manage_users', 'freeze_users', 'view_deposits',
+    'view_withdrawals', 'approve_withdrawals', 'reject_withdrawals', 'export_finance_reports',
+    'view_kyc', 'approve_kyc', 'reject_kyc', 'request_kyc_resubmission',
+    'create_bonuses', 'manage_bonuses', 'view_tickets', 'resolve_tickets',
+    'configure_payment_gateways', 'view_server_health', 'view_logs', 'configure_maintenance_mode',
+    'manage_admins', 'assign_roles', 'view_admins', 'delete_admins', 'change_system_settings'
+  ],
+  finance_admin: [
+    'view_dashboard', 'view_deposits', 'view_withdrawals', 'approve_withdrawals',
+    'reject_withdrawals', 'export_finance_reports'
+  ],
+  support_admin: [
+    'view_dashboard', 'view_users', 'manage_users', 'freeze_users', 'view_tickets', 'resolve_tickets'
+  ],
+  kyc_admin: [
+    'view_dashboard', 'view_kyc', 'approve_kyc', 'reject_kyc', 'request_kyc_resubmission'
+  ],
+  marketing_admin: [
+    'view_dashboard', 'create_bonuses', 'manage_bonuses', 'view_referrals', 'create_promo_codes', 'send_notifications'
+  ],
+  system_admin: [
+    'view_dashboard', 'configure_payment_gateways', 'view_server_health', 'view_logs', 'configure_maintenance_mode'
+  ],
+  unassigned: []
+};
+
 const adminSchema = new mongoose.Schema({
   // Basic Information
   fullName: {
@@ -229,7 +258,7 @@ adminSchema.methods.logoutAllDevices = function() {
 
 // Static method to get role permissions
 adminSchema.statics.getRolePermissions = function(role) {
-  const rolePermissions = {
+  const ROLE_PERMISSIONS = {
     super_admin: ['*'], // Full access
     finance_admin: [
       'view_deposits',
