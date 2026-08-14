@@ -59,7 +59,8 @@ async function beginFlight() {
   flightInterval = setInterval(async () => {
     try {
       const elapsed = (Date.now() - startTime) / 1000;
-      const nextMultiplier = Math.min(1 + elapsed * 0.16 + Math.pow(elapsed, 2) * 0.01, crashPoint);
+      const rawMultiplier = 1 + elapsed * 0.16 + Math.pow(elapsed, 2) * 0.01;
+      const nextMultiplier = Math.min(rawMultiplier, crashPoint);
       const roundedMultiplier = Number(nextMultiplier.toFixed(2));
       setInMemoryRound('multiplier', roundedMultiplier);
 
@@ -70,7 +71,7 @@ async function beginFlight() {
         phase: round.phase,
       });
 
-      if (roundedMultiplier >= crashPoint) {
+      if (rawMultiplier >= crashPoint) {
         clearFlightInterval();
         await crashRound();
       }
