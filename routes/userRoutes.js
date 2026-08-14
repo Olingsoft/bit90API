@@ -142,29 +142,79 @@ router.post('/deposit', async (req, res) => {
     }
 
     const balanceBefore = Number(user.balance || 0);
-    const balanceAfter = balanceBefore + numAmount;
-    user.balance = balanceAfter;
-    await user.save();
 
-    const reference = `DEP-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    // 1. M-Pesa STK Push Integration
+    const consumerKey = process.env.MPESA_CONSUMER_KEY || "cQJ4aARa4S8GrZAc0XWXlrFvFQjAvc4JK77H2NwhqHCOAgUg";
+    const consumerSecret = process.env.MPESA_CONSUMER_SECRET || "CyPWywhC0jw2JGHQIrcGyH2AhbCIemYIXxzxQjJbiBjwlgLYECSBCMUAmFMH8lE2";
+    const passkey = process.env.MPESA_PASSKEY || "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919";
+    const shortcode = process.env.MPESA_SHORTCODE || "174379";
+
+    const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
+    const tokenRes = await fetch("https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials", {
+      headers: { Authorization: `Basic ${auth}` },
+    });
+
+    if (!tokenRes.ok) {
+      const err = await tokenRes.text();
+      console.error("M-Pesa Token Error:", err);
+      return res.status(500).json({ message: 'Failed to authenticate with M-Pesa' });
+    }
+
+    const { access_token } = await tokenRes.json();
+
+    const timestamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
+    const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString("base64");
+
+    let formattedPhone = user.phone.replace(/\D/g, "");
+    if (formattedPhone.startsWith("0")) formattedPhone = `254${formattedPhone.slice(1)}`;
+    if (formattedPhone.startsWith("+")) formattedPhone = formattedPhone.slice(1);
+    if (!formattedPhone.startsWith("254")) formattedPhone = `254${formattedPhone}`;
+
+    // Note: In production, CallBackURL should be your live server's webhook endpoint
+    const callbackUrl = process.env.MPESA_CALLBACK_URL || "https://mydomain.com/api/users/mpesa/callback";
+
+    const stkRes = await fetch("https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        BusinessShortCode: shortcode,
+        Password: password,
+        Timestamp: timestamp,
+        TransactionType: "CustomerPayBillOnline",
+        Amount: Math.floor(numAmount),
+        PartyA: formattedPhone,
+        PartyB: shortcode,
+        PhoneNumber: formattedPhone,
+        CallBackURL: callbackUrl,
+        AccountReference: "Bit90 Deposit",
+        TransactionDesc: "Deposit",
+      }),
+    });
+
+    if (!stkRes.ok) {
+      const err = await stkRes.text();
+      console.error("M-Pesa STK Push Error:", err);
+      return res.status(500).json({ message: 'Failed to initiate STK Push' });
+    }
+
+    const stkData = await stkRes.json();
+    const reference = stkData.CheckoutRequestID || `DEP-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const transaction = await Transaction.create({
       userId: user._id,
       amount: numAmount,
       type: 'deposit',
+      status: 'pending',
       balanceBefore,
-      balanceAfter,
+      balanceAfter: balanceBefore, // unchanged until callback
       reference,
     });
 
     return res.status(200).json({
-      message: 'Deposit completed successfully',
-      balance: user.balance,
-      user: {
-        id: String(user._id),
-        phone: user.phone,
-        balance: user.balance,
-      },
+      message: 'M-Pesa prompt sent successfully. Check your phone to complete.',
       transaction: {
         id: String(transaction._id),
         amount: transaction.amount,
@@ -175,6 +225,46 @@ router.post('/deposit', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: 'Deposit failed', error: error.message });
+  }
+});
+
+// POST /users/mpesa/callback - Handle Safaricom STK Push Callback
+router.post('/mpesa/callback', async (req, res) => {
+  try {
+    const callbackData = req.body.Body.stkCallback;
+    console.log("M-Pesa Callback Received:", JSON.stringify(callbackData, null, 2));
+
+    const { CheckoutRequestID, ResultCode } = callbackData;
+
+    // Acknowledge Safaricom immediately
+    res.status(200).json({ ResultCode: 0, ResultDesc: "Success" });
+
+    if (ResultCode === 0) {
+      // Find the pending transaction by CheckoutRequestID
+      const transaction = await Transaction.findOne({ reference: CheckoutRequestID });
+      if (transaction && transaction.status === 'pending') {
+        const user = await User.findById(transaction.userId);
+        if (user) {
+          const newBalance = Number(user.balance || 0) + transaction.amount;
+          user.balance = newBalance;
+          await user.save();
+
+          transaction.status = 'completed';
+          transaction.balanceAfter = newBalance;
+          await transaction.save();
+        }
+      }
+    } else {
+      // Handle failed transaction
+      const transaction = await Transaction.findOne({ reference: CheckoutRequestID });
+      if (transaction) {
+        transaction.status = 'failed';
+        await transaction.save();
+      }
+    }
+  } catch (error) {
+    console.error("M-Pesa Callback Error:", error);
+    // Already responded to Safaricom, but logging the error
   }
 });
 
@@ -192,4 +282,70 @@ router.get('/transactions', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /users/withdraw - Request a withdrawal and deduct from user balance
+router.post('/withdraw', authMiddleware, async (req, res) => {
+  try {
+    const { amount, phone: phoneOverride } = req.body;
+    const numAmount = Number(amount);
+
+    if (!numAmount || isNaN(numAmount) || numAmount <= 0) {
+      return res.status(400).json({ message: 'A valid withdrawal amount greater than 0 is required' });
+    }
+
+    if (numAmount < 50) {
+      return res.status(400).json({ message: 'Minimum withdrawal amount is KSh 50' });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const balanceBefore = Number(user.balance || 0);
+
+    if (numAmount > balanceBefore) {
+      return res.status(400).json({ message: `Insufficient balance. Your balance is KSh ${balanceBefore.toFixed(2)}` });
+    }
+
+    const balanceAfter = balanceBefore - numAmount;
+    user.balance = balanceAfter;
+    await user.save();
+
+    const reference = `WTH-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const transaction = await Transaction.create({
+      userId: user._id,
+      amount: numAmount,
+      type: 'withdrawal',
+      status: 'pending',
+      balanceBefore,
+      balanceAfter,
+      reference,
+      phone: phoneOverride || user.phone,
+      paymentMethod: 'mpesa',
+    });
+
+    return res.status(200).json({
+      message: 'Withdrawal request submitted successfully',
+      balance: user.balance,
+      user: {
+        id: String(user._id),
+        phone: user.phone,
+        balance: user.balance,
+      },
+      transaction: {
+        id: String(transaction._id),
+        amount: transaction.amount,
+        type: transaction.type,
+        status: transaction.status,
+        reference: transaction.reference,
+        createdAt: transaction.createdAt,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: 'Withdrawal failed', error: error.message });
+  }
+});
+
 module.exports = router;
+

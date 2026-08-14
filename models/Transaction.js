@@ -16,6 +16,11 @@ const transactionSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    status: {
+      type: String,
+      enum: ['pending', 'completed', 'rejected', 'on_hold'],
+      default: 'completed',
+    },
     balanceBefore: {
       type: Number,
       required: true,
@@ -28,6 +33,22 @@ const transactionSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    paymentMethod: {
+      type: String,
+      default: null,
+    },
+    phone: {
+      type: String,
+      default: null,
+    },
+    notes: {
+      type: String,
+      default: null,
+    },
+    processedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: { createdAt: true, updatedAt: false },
@@ -37,5 +58,7 @@ const transactionSchema = new mongoose.Schema(
 transactionSchema.index({ userId: 1 });
 transactionSchema.index({ createdAt: -1 });
 transactionSchema.index({ type: 1 });
+transactionSchema.index({ status: 1 });
 
 module.exports = mongoose.model('Transaction', transactionSchema);
+

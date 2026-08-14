@@ -48,10 +48,11 @@ const getAllDeposits = async (req, res) => {
     const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
     const deposits = await Transaction.find(query)
-      .populate('user', 'phone email')
+      .populate('userId', 'phone email')
       .sort(sort)
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
 
     const total = await Transaction.countDocuments(query);
 
@@ -114,10 +115,11 @@ const getAllWithdrawals = async (req, res) => {
     const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
     const withdrawals = await Transaction.find(query)
-      .populate('user', 'phone email')
+      .populate('userId', 'phone email')
       .sort(sort)
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
 
     const total = await Transaction.countDocuments(query);
 
@@ -144,7 +146,8 @@ const getTransactionById = async (req, res) => {
     const { transactionId } = req.params;
 
     const transaction = await Transaction.findById(transactionId)
-      .populate('user', 'phone email fullName');
+      .populate('userId', 'phone email fullName')
+      .lean();
 
     if (!transaction) {
       return res.status(404).json({ message: 'Transaction not found' });
@@ -165,7 +168,7 @@ const approveWithdrawal = async (req, res) => {
     const { transactionId } = req.params;
     const { notes } = req.body;
 
-    const transaction = await Transaction.findById(transactionId).populate('user');
+    const transaction = await Transaction.findById(transactionId).populate('userId');
 
     if (!transaction) {
       return res.status(404).json({ message: 'Transaction not found' });
@@ -193,7 +196,7 @@ const approveWithdrawal = async (req, res) => {
       actionDetails: notes || 'Withdrawal approved',
       targetType: 'withdrawal',
       targetId: transactionId,
-      targetUser: transaction.user._id,
+      targetUser: transaction.userId?._id || transaction.userId,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
       browser: req.headers['user-agent'],
@@ -223,7 +226,7 @@ const rejectWithdrawal = async (req, res) => {
       return res.status(400).json({ message: 'Rejection reason is required' });
     }
 
-    const transaction = await Transaction.findById(transactionId).populate('user');
+    const transaction = await Transaction.findById(transactionId).populate('userId');
 
     if (!transaction) {
       return res.status(404).json({ message: 'Transaction not found' });
@@ -244,7 +247,7 @@ const rejectWithdrawal = async (req, res) => {
     await transaction.save();
 
     // Refund user balance
-    const user = await User.findById(transaction.user._id);
+    const user = await User.findById(transaction.userId?._id || transaction.userId);
     if (user) {
       user.balance += transaction.amount;
       await user.save();
@@ -259,7 +262,7 @@ const rejectWithdrawal = async (req, res) => {
       actionDetails: `Reason: ${reason}. ${notes || ''}`,
       targetType: 'withdrawal',
       targetId: transactionId,
-      targetUser: transaction.user._id,
+      targetUser: transaction.userId?._id || transaction.userId,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
       browser: req.headers['user-agent'],
