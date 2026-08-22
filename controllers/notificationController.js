@@ -10,7 +10,7 @@ const getNotifications = async (req, res) => {
     const { page = 1, limit = 20, unreadOnly = false } = req.query;
 
     const query = { recipient: req.user.id };
-    
+
     if (unreadOnly === 'true') {
       query.isRead = false;
     }
@@ -23,9 +23,9 @@ const getNotifications = async (req, res) => {
       .limit(limit);
 
     const total = await Notification.countDocuments(query);
-    const unreadCount = await Notification.countDocuments({ 
-      recipient: req.user.id, 
-      isRead: false 
+    const unreadCount = await Notification.countDocuments({
+      recipient: req.user.id,
+      isRead: false
     });
 
     res.json({
