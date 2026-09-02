@@ -18,7 +18,7 @@ const transactionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'completed', 'rejected', 'on_hold'],
+      enum: ['pending', 'completed', 'rejected', 'on_hold', 'failed'],
       default: 'completed',
     },
     balanceBefore: {
