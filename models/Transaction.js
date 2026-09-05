@@ -45,6 +45,31 @@ const transactionSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    checkoutRequestId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    merchantRequestId: {
+      type: String,
+      default: null,
+    },
+    mpesaReceiptNumber: {
+      type: String,
+      default: null,
+    },
+    resultCode: {
+      type: Number,
+      default: null,
+    },
+    resultDesc: {
+      type: String,
+      default: null,
+    },
+    transactionDate: {
+      type: Date,
+      default: null,
+    },
     processedAt: {
       type: Date,
       default: null,
@@ -59,6 +84,8 @@ transactionSchema.index({ userId: 1 });
 transactionSchema.index({ createdAt: -1 });
 transactionSchema.index({ type: 1 });
 transactionSchema.index({ status: 1 });
+transactionSchema.index({ reference: 1 });
+transactionSchema.index({ checkoutRequestId: 1 });
 
 module.exports = mongoose.model('Transaction', transactionSchema);
 

@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const { authMiddleware } = require('../middleware/auth');
+const mpesaService = require('../services/mpesaService');
 
 const router = express.Router();
 
@@ -99,7 +100,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// POST /users/deposit - Process funds deposit and update user balance
+// POST /users/deposit - Initiate M-Pesa STK Push and create pending transaction
 router.post('/deposit', async (req, res) => {
   try {
     const { phone, amount } = req.body;
@@ -143,66 +144,18 @@ router.post('/deposit', async (req, res) => {
 
     const balanceBefore = Number(user.balance || 0);
 
-    // 1. M-Pesa STK Push Integration
-    const consumerKey = process.env.MPESA_CONSUMER_KEY || "cQJ4aARa4S8GrZAc0XWXlrFvFQjAvc4JK77H2NwhqHCOAgUg";
-    const consumerSecret = process.env.MPESA_CONSUMER_SECRET || "CyPWywhC0jw2JGHQIrcGyH2AhbCIemYIXxzxQjJbiBjwlgLYECSBCMUAmFMH8lE2";
-    const passkey = process.env.MPESA_PASSKEY || "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919";
-    const shortcode = process.env.MPESA_SHORTCODE || "174379";
-
-    const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64");
-    const tokenRes = await fetch("https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials", {
-      headers: { Authorization: `Basic ${auth}` },
+    // Initiate M-Pesa STK Push via service
+    const stkData = await mpesaService.initiateSTKPush({
+      phone: user.phone,
+      amount: numAmount,
+      accountRef: 'Bit90 Deposit',
+      transactionDesc: 'Deposit',
     });
 
-    if (!tokenRes.ok) {
-      const err = await tokenRes.text();
-      console.error("M-Pesa Token Error:", err);
-      return res.status(500).json({ message: 'Failed to authenticate with M-Pesa' });
-    }
+    console.log('[Deposit] STK Push response received — CheckoutRequestID:', stkData.CheckoutRequestID);
 
-    const { access_token } = await tokenRes.json();
-
-    const timestamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
-    const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString("base64");
-
-    let formattedPhone = user.phone.replace(/\D/g, "");
-    if (formattedPhone.startsWith("0")) formattedPhone = `254${formattedPhone.slice(1)}`;
-    if (formattedPhone.startsWith("+")) formattedPhone = formattedPhone.slice(1);
-    if (!formattedPhone.startsWith("254")) formattedPhone = `254${formattedPhone}`;
-
-    // Note: In production, CallBackURL should be your live server's webhook endpoint
-    const callbackUrl = process.env.MPESA_CALLBACK_URL || "https://mydomain.com/api/users/mpesa/callback";
-
-    const stkRes = await fetch("https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        BusinessShortCode: shortcode,
-        Password: password,
-        Timestamp: timestamp,
-        TransactionType: "CustomerPayBillOnline",
-        Amount: Math.floor(numAmount),
-        PartyA: formattedPhone,
-        PartyB: shortcode,
-        PhoneNumber: formattedPhone,
-        CallBackURL: callbackUrl,
-        AccountReference: "Bit90 Deposit",
-        TransactionDesc: "Deposit",
-      }),
-    });
-
-    if (!stkRes.ok) {
-      const err = await stkRes.text();
-      console.error("M-Pesa STK Push Error:", err);
-      return res.status(500).json({ message: 'Failed to initiate STK Push' });
-    }
-
-    const stkData = await stkRes.json();
-    const reference = stkData.CheckoutRequestID || `DEP-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
-
+    // Create pending transaction with M-Pesa tracking IDs
+    const formattedPhone = mpesaService.formatPhone(user.phone);
     const transaction = await Transaction.create({
       userId: user._id,
       amount: numAmount,
@@ -210,8 +163,14 @@ router.post('/deposit', async (req, res) => {
       status: 'pending',
       balanceBefore,
       balanceAfter: balanceBefore, // unchanged until callback
-      reference,
+      reference: stkData.CheckoutRequestID,
+      paymentMethod: 'mpesa',
+      phone: formattedPhone,
+      merchantRequestId: stkData.MerchantRequestID,
+      checkoutRequestId: stkData.CheckoutRequestID,
     });
+
+    console.log('[Deposit] Pending transaction created:', transaction._id);
 
     return res.status(200).json({
       message: 'M-Pesa prompt sent successfully. Check your phone to complete.',
@@ -224,47 +183,287 @@ router.post('/deposit', async (req, res) => {
       },
     });
   } catch (error) {
+    console.error('[Deposit] Error:', error.message);
     return res.status(500).json({ message: 'Deposit failed', error: error.message });
   }
 });
 
-// POST /users/mpesa/callback - Handle Safaricom STK Push Callback
+// POST /users/mpesa/callback - Handle Safaricom STK Push Callback (idempotent)
 router.post('/mpesa/callback', async (req, res) => {
+  // ALWAYS respond 200 immediately — Safaricom will retry on non-200
+  res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
+
+  // Process the callback asynchronously after responding
   try {
-    const callbackData = req.body.Body.stkCallback;
-    console.log("M-Pesa Callback Received:", JSON.stringify(callbackData, null, 2));
+    const callbackData = req.body?.Body?.stkCallback;
 
-    const { CheckoutRequestID, ResultCode } = callbackData;
+    if (!callbackData) {
+      console.error('[M-Pesa Callback] Invalid callback body — missing Body.stkCallback');
+      return;
+    }
 
-    // Acknowledge Safaricom immediately
-    res.status(200).json({ ResultCode: 0, ResultDesc: "Success" });
+    const {
+      MerchantRequestID,
+      CheckoutRequestID,
+      ResultCode,
+      ResultDesc,
+      CallbackMetadata,
+    } = callbackData;
+
+    console.log(
+      '[M-Pesa Callback] Received — CheckoutRequestID:', CheckoutRequestID,
+      'ResultCode:', ResultCode,
+      'ResultDesc:', ResultDesc
+    );
 
     if (ResultCode === 0) {
-      // Find the pending transaction by CheckoutRequestID
-      const transaction = await Transaction.findOne({ reference: CheckoutRequestID });
-      if (transaction && transaction.status === 'pending') {
-        const user = await User.findById(transaction.userId);
-        if (user) {
-          const newBalance = Number(user.balance || 0) + transaction.amount;
-          user.balance = newBalance;
-          await user.save();
+      // ── SUCCESS ──────────────────────────────────────────────────
+      // Extract metadata from callback
+      const metadata = mpesaService.parseCallbackMetadata(
+        CallbackMetadata?.Item || []
+      );
 
-          transaction.status = 'completed';
-          transaction.balanceAfter = newBalance;
-          await transaction.save();
+      const confirmedAmount = metadata.Amount;
+      const mpesaReceiptNumber = metadata.MpesaReceiptNumber || null;
+      const mpesaPhone = metadata.PhoneNumber ? String(metadata.PhoneNumber) : null;
+
+      // Parse M-Pesa transaction date (format: YYYYMMDDHHmmss)
+      let transactionDate = null;
+      if (metadata.TransactionDate) {
+        const ds = String(metadata.TransactionDate);
+        if (ds.length >= 14) {
+          transactionDate = new Date(
+            `${ds.slice(0, 4)}-${ds.slice(4, 6)}-${ds.slice(6, 8)}T${ds.slice(8, 10)}:${ds.slice(10, 12)}:${ds.slice(12, 14)}+03:00`
+          );
         }
       }
-    } else {
-      // Handle failed transaction
-      const transaction = await Transaction.findOne({ reference: CheckoutRequestID });
-      if (transaction) {
-        transaction.status = 'failed';
+
+      // Atomic update: only updates if status is still 'pending' (idempotency)
+      const transaction = await Transaction.findOneAndUpdate(
+        {
+          $or: [
+            { checkoutRequestId: CheckoutRequestID },
+            { reference: CheckoutRequestID },
+          ],
+          status: 'pending',
+        },
+        {
+          $set: {
+            status: 'completed',
+            checkoutRequestId: CheckoutRequestID,
+            merchantRequestId: MerchantRequestID,
+            resultCode: ResultCode,
+            resultDesc: ResultDesc,
+            mpesaReceiptNumber: mpesaReceiptNumber,
+            transactionDate: transactionDate,
+            processedAt: new Date(),
+          },
+        },
+        { new: true }
+      );
+
+      if (!transaction) {
+        console.warn(
+          '[M-Pesa Callback] No pending transaction found for CheckoutRequestID:',
+          CheckoutRequestID,
+          '— likely already processed (idempotency check passed)'
+        );
+        return;
+      }
+
+      // Credit the user's balance
+      const depositAmount = confirmedAmount || transaction.amount;
+      const user = await User.findById(transaction.userId);
+
+      if (user) {
+        const newBalance = Number(user.balance || 0) + depositAmount;
+        user.balance = newBalance;
+        await user.save();
+
+        // Update balanceAfter on the transaction
+        transaction.balanceAfter = newBalance;
         await transaction.save();
+
+        console.log(
+          '[M-Pesa Callback] Payment SUCCESS — User:', user._id,
+          'Amount:', depositAmount,
+          'Receipt:', mpesaReceiptNumber,
+          'NewBalance:', newBalance
+        );
+      } else {
+        console.error(
+          '[M-Pesa Callback] User not found for transaction:', transaction._id,
+          'userId:', transaction.userId
+        );
+      }
+    } else {
+      // ── FAILURE ──────────────────────────────────────────────────
+      const transaction = await Transaction.findOneAndUpdate(
+        {
+          $or: [
+            { checkoutRequestId: CheckoutRequestID },
+            { reference: CheckoutRequestID },
+          ],
+          status: 'pending',
+        },
+        {
+          $set: {
+            status: 'failed',
+            checkoutRequestId: CheckoutRequestID,
+            merchantRequestId: MerchantRequestID,
+            resultCode: ResultCode,
+            resultDesc: ResultDesc,
+            processedAt: new Date(),
+          },
+        },
+        { new: true }
+      );
+
+      if (transaction) {
+        console.log(
+          '[M-Pesa Callback] Payment FAILED — Transaction:', transaction._id,
+          'ResultCode:', ResultCode,
+          'ResultDesc:', ResultDesc
+        );
+      } else {
+        console.warn(
+          '[M-Pesa Callback] No pending transaction found for failed callback — CheckoutRequestID:',
+          CheckoutRequestID
+        );
       }
     }
   } catch (error) {
-    console.error("M-Pesa Callback Error:", error);
-    // Already responded to Safaricom, but logging the error
+    console.error('[M-Pesa Callback] Processing error:', error.message, error.stack);
+  }
+});
+
+// POST /users/mpesa/verify - Manually verify a pending M-Pesa transaction
+router.post('/mpesa/verify', authMiddleware, async (req, res) => {
+  try {
+    const { checkoutRequestId, transactionId } = req.body;
+
+    if (!checkoutRequestId && !transactionId) {
+      return res.status(400).json({ message: 'checkoutRequestId or transactionId is required' });
+    }
+
+    // Find the transaction
+    let transaction;
+    if (transactionId) {
+      transaction = await Transaction.findById(transactionId);
+    } else {
+      transaction = await Transaction.findOne({
+        $or: [
+          { checkoutRequestId },
+          { reference: checkoutRequestId },
+        ],
+      });
+    }
+
+    if (!transaction) {
+      return res.status(404).json({ message: 'Transaction not found' });
+    }
+
+    // Only verify the requesting user's own transactions
+    if (String(transaction.userId) !== String(req.user.id)) {
+      return res.status(403).json({ message: 'Not authorized to verify this transaction' });
+    }
+
+    if (transaction.status !== 'pending') {
+      return res.status(200).json({
+        message: `Transaction already resolved as: ${transaction.status}`,
+        transaction: {
+          id: String(transaction._id),
+          status: transaction.status,
+          mpesaReceiptNumber: transaction.mpesaReceiptNumber,
+          resultDesc: transaction.resultDesc,
+        },
+      });
+    }
+
+    // Query M-Pesa STK Push status
+    const targetCheckoutId = transaction.checkoutRequestId || transaction.reference;
+    const queryResult = await mpesaService.querySTKPushStatus(targetCheckoutId);
+
+    if (String(queryResult.ResultCode) === '0') {
+      // Payment was successful — update transaction
+      const updated = await Transaction.findOneAndUpdate(
+        { _id: transaction._id, status: 'pending' },
+        {
+          $set: {
+            status: 'completed',
+            resultCode: Number(queryResult.ResultCode),
+            resultDesc: queryResult.ResultDesc,
+            processedAt: new Date(),
+          },
+        },
+        { new: true }
+      );
+
+      if (updated) {
+        // Credit user balance
+        const user = await User.findById(updated.userId);
+        if (user) {
+          const newBalance = Number(user.balance || 0) + updated.amount;
+          user.balance = newBalance;
+          await user.save();
+          updated.balanceAfter = newBalance;
+          await updated.save();
+
+          console.log('[M-Pesa Verify] Payment confirmed SUCCESS — User:', user._id, 'Amount:', updated.amount);
+        }
+
+        return res.status(200).json({
+          message: 'Payment verified and completed successfully',
+          transaction: {
+            id: String(updated._id),
+            status: updated.status,
+            amount: updated.amount,
+            mpesaReceiptNumber: updated.mpesaReceiptNumber,
+          },
+        });
+      }
+    } else {
+      // Payment failed or still pending
+      const resultCode = Number(queryResult.ResultCode);
+
+      // ResultCode 1032 = cancelled, 1037 = timeout, etc. — mark as failed
+      if (resultCode !== 0) {
+        await Transaction.findOneAndUpdate(
+          { _id: transaction._id, status: 'pending' },
+          {
+            $set: {
+              status: 'failed',
+              resultCode: resultCode,
+              resultDesc: queryResult.ResultDesc,
+              processedAt: new Date(),
+            },
+          }
+        );
+
+        console.log('[M-Pesa Verify] Payment confirmed FAILED — ResultCode:', resultCode);
+
+        return res.status(200).json({
+          message: `Transaction failed: ${queryResult.ResultDesc}`,
+          transaction: {
+            id: String(transaction._id),
+            status: 'failed',
+            resultCode: resultCode,
+            resultDesc: queryResult.ResultDesc,
+          },
+        });
+      }
+    }
+
+    return res.status(200).json({
+      message: 'Transaction is still being processed by M-Pesa',
+      transaction: {
+        id: String(transaction._id),
+        status: 'pending',
+      },
+    });
+  } catch (error) {
+    console.error('[M-Pesa Verify] Error:', error.message);
+    return res.status(500).json({ message: 'Verification failed', error: error.message });
   }
 });
 
