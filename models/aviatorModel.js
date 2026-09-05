@@ -13,6 +13,7 @@ function formatRound(round) {
   const doc = round.toObject ? round.toObject() : round;
   return {
     id: String(doc._id),
+    roundId: String(doc._id),
     hash: doc.hash,
     serverSeed: doc.serverSeed,
     crashPoint: doc.crashPoint,
@@ -22,6 +23,10 @@ function formatRound(round) {
     multiplier: doc.multiplier,
     startedAt: doc.startedAt instanceof Date ? doc.startedAt.toISOString() : doc.startedAt,
     crashedAt: doc.crashedAt instanceof Date ? doc.crashedAt.toISOString() : doc.crashedAt,
+    endedAt:
+      doc.crashedAt instanceof Date
+        ? doc.crashedAt.toISOString()
+        : doc.crashedAt || (doc.createdAt instanceof Date ? doc.createdAt.toISOString() : doc.createdAt),
     revealedAt: doc.revealedAt instanceof Date ? doc.revealedAt.toISOString() : doc.revealedAt,
     createdAt: doc.createdAt instanceof Date ? doc.createdAt.toISOString() : doc.createdAt,
   };
@@ -80,9 +85,11 @@ async function getRound(roundId) {
   return formatRound(round);
 }
 
-async function listRounds(limitCount = 20) {
-  const rounds = await Round.find({ status: 'crashed' })  // only completed rounds
-    .sort({ createdAt: -1 })
+async function listRounds(limitCount = 50) {
+  const rounds = await Round.find({
+    crashPoint: { $ne: null, $gt: 0 },
+  })
+    .sort({ crashedAt: -1, createdAt: -1 })
     .limit(limitCount)
     .lean();
   return rounds.map((round) => formatRound(round));

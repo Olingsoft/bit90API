@@ -22,7 +22,7 @@ router.get('/state', (req, res) => {
 
 router.get('/history', async (req, res) => {
   try {
-    const rounds = await listRounds(20);
+    const rounds = await listRounds(50);
     res.json(rounds);
   } catch (error) {
     res.status(500).json({ message: 'Unable to fetch aviator history', error: error.message });
