@@ -226,7 +226,7 @@ router.post('/deposit', async (req, res) => {
     const stkData = await mpesaService.initiateSTKPush({
       phone: user.phone,
       amount: numAmount,
-      accountRef: 'Bit90 Deposit',
+      accountRef: 'Olingsoft Tech.',
       transactionDesc: 'Deposit',
     });
 
