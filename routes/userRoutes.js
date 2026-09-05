@@ -4,8 +4,71 @@ const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const { authMiddleware } = require('../middleware/auth');
 const mpesaService = require('../services/mpesaService');
+const depositSettlement = require('../services/depositSettlement');
 
 const router = express.Router();
+
+// Safaricom STK Query: 4999 = still processing. Never treat as a final failure.
+const MPESA_PROCESSING_CODES = new Set([4999]);
+const MPESA_TERMINAL_FAILURE_CODES = new Set([
+  1,    // Insufficient funds
+  1001, // Unable to lock subscriber
+  1019, // Transaction expired
+  1025, // Error occurred during transaction
+  1032, // Request cancelled by user
+  1037, // Timeout / DS timeout (PIN not entered)
+  2001, // Wrong PIN
+]);
+
+function parseMpesaResultCode(value) {
+  if (value === undefined || value === null || value === '' || value === 'PROCESSING') {
+    return null;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function isMpesaSuccessCode(value) {
+  return parseMpesaResultCode(value) === 0 || String(value) === '0';
+}
+
+function isMpesaProcessingResult(value, desc) {
+  if (value === 'PROCESSING') return true;
+  const code = parseMpesaResultCode(value);
+  if (code !== null && MPESA_PROCESSING_CODES.has(code)) return true;
+  const text = String(desc || '').toLowerCase();
+  return text.includes('still under processing') || text.includes('being processed');
+}
+
+function isMpesaTerminalFailureCode(code) {
+  return MPESA_TERMINAL_FAILURE_CODES.has(code);
+}
+
+const STK_PROMPT_GRACE_MS = 120000;
+
+function isFinalFailure(transaction) {
+  if (!transaction || transaction.credited || transaction.status === 'completed') return false;
+  if (transaction.status !== 'failed') return false;
+  if (transaction.mpesaReceiptNumber) return false;
+
+  const createdAt = transaction.createdAt ? new Date(transaction.createdAt).getTime() : 0;
+  const ageMs = createdAt ? Date.now() - createdAt : 0;
+  if (ageMs < STK_PROMPT_GRACE_MS) return false;
+
+  const code = parseMpesaResultCode(transaction.resultCode);
+  if (code === null || MPESA_PROCESSING_CODES.has(code)) return false;
+  if (!isMpesaTerminalFailureCode(code)) return false;
+
+  return true;
+}
+
+function getPublicDepositStatus(transaction) {
+  if (transaction.credited || transaction.status === 'completed') return 'completed';
+  if (transaction.status === 'failed' && !isFinalFailure(transaction)) {
+    return 'pending';
+  }
+  return transaction.status;
+}
 
 function formatUser(user) {
   return {
@@ -13,7 +76,7 @@ function formatUser(user) {
     phone: user.phone,
     username: user.username,
     email: user.email,
-    balance: user.balance,
+    balance: Number(user.balance || 0),
     isAdmin: user.isAdmin,
     role: user.role,
     createdAt: user.createdAt instanceof Date ? user.createdAt.toISOString() : user.createdAt,
@@ -97,6 +160,21 @@ router.post('/login', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: 'Login failed', error: error.message });
+  }
+});
+
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const payload = formatUser(user);
+    payload.balance = Number(user.balance || 0);
+    return res.status(200).json(payload);
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to fetch profile', error: error.message });
   }
 });
 
@@ -189,153 +267,7 @@ router.post('/deposit', async (req, res) => {
 });
 
 // POST /users/mpesa/callback - Handle Safaricom STK Push Callback (idempotent)
-router.post('/mpesa/callback', async (req, res) => {
-  // ALWAYS respond 200 immediately — Safaricom will retry on non-200
-  res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
-
-  // Process the callback asynchronously after responding
-  try {
-    const callbackData = req.body?.Body?.stkCallback;
-
-    if (!callbackData) {
-      console.error('[M-Pesa Callback] Invalid callback body — missing Body.stkCallback');
-      return;
-    }
-
-    const {
-      MerchantRequestID,
-      CheckoutRequestID,
-      ResultCode,
-      ResultDesc,
-      CallbackMetadata,
-    } = callbackData;
-
-    console.log(
-      '[M-Pesa Callback] Received — CheckoutRequestID:', CheckoutRequestID,
-      'ResultCode:', ResultCode,
-      'ResultDesc:', ResultDesc
-    );
-
-    if (ResultCode === 0) {
-      // ── SUCCESS ──────────────────────────────────────────────────
-      // Extract metadata from callback
-      const metadata = mpesaService.parseCallbackMetadata(
-        CallbackMetadata?.Item || []
-      );
-
-      const confirmedAmount = metadata.Amount;
-      const mpesaReceiptNumber = metadata.MpesaReceiptNumber || null;
-      const mpesaPhone = metadata.PhoneNumber ? String(metadata.PhoneNumber) : null;
-
-      // Parse M-Pesa transaction date (format: YYYYMMDDHHmmss)
-      let transactionDate = null;
-      if (metadata.TransactionDate) {
-        const ds = String(metadata.TransactionDate);
-        if (ds.length >= 14) {
-          transactionDate = new Date(
-            `${ds.slice(0, 4)}-${ds.slice(4, 6)}-${ds.slice(6, 8)}T${ds.slice(8, 10)}:${ds.slice(10, 12)}:${ds.slice(12, 14)}+03:00`
-          );
-        }
-      }
-
-      // Atomic update: only updates if status is still 'pending' (idempotency)
-      const transaction = await Transaction.findOneAndUpdate(
-        {
-          $or: [
-            { checkoutRequestId: CheckoutRequestID },
-            { reference: CheckoutRequestID },
-          ],
-          status: 'pending',
-        },
-        {
-          $set: {
-            status: 'completed',
-            checkoutRequestId: CheckoutRequestID,
-            merchantRequestId: MerchantRequestID,
-            resultCode: ResultCode,
-            resultDesc: ResultDesc,
-            mpesaReceiptNumber: mpesaReceiptNumber,
-            transactionDate: transactionDate,
-            processedAt: new Date(),
-          },
-        },
-        { new: true }
-      );
-
-      if (!transaction) {
-        console.warn(
-          '[M-Pesa Callback] No pending transaction found for CheckoutRequestID:',
-          CheckoutRequestID,
-          '— likely already processed (idempotency check passed)'
-        );
-        return;
-      }
-
-      // Credit the user's balance
-      const depositAmount = confirmedAmount || transaction.amount;
-      const user = await User.findById(transaction.userId);
-
-      if (user) {
-        const newBalance = Number(user.balance || 0) + depositAmount;
-        user.balance = newBalance;
-        await user.save();
-
-        // Update balanceAfter on the transaction
-        transaction.balanceAfter = newBalance;
-        await transaction.save();
-
-        console.log(
-          '[M-Pesa Callback] Payment SUCCESS — User:', user._id,
-          'Amount:', depositAmount,
-          'Receipt:', mpesaReceiptNumber,
-          'NewBalance:', newBalance
-        );
-      } else {
-        console.error(
-          '[M-Pesa Callback] User not found for transaction:', transaction._id,
-          'userId:', transaction.userId
-        );
-      }
-    } else {
-      // ── FAILURE ──────────────────────────────────────────────────
-      const transaction = await Transaction.findOneAndUpdate(
-        {
-          $or: [
-            { checkoutRequestId: CheckoutRequestID },
-            { reference: CheckoutRequestID },
-          ],
-          status: 'pending',
-        },
-        {
-          $set: {
-            status: 'failed',
-            checkoutRequestId: CheckoutRequestID,
-            merchantRequestId: MerchantRequestID,
-            resultCode: ResultCode,
-            resultDesc: ResultDesc,
-            processedAt: new Date(),
-          },
-        },
-        { new: true }
-      );
-
-      if (transaction) {
-        console.log(
-          '[M-Pesa Callback] Payment FAILED — Transaction:', transaction._id,
-          'ResultCode:', ResultCode,
-          'ResultDesc:', ResultDesc
-        );
-      } else {
-        console.warn(
-          '[M-Pesa Callback] No pending transaction found for failed callback — CheckoutRequestID:',
-          CheckoutRequestID
-        );
-      }
-    }
-  } catch (error) {
-    console.error('[M-Pesa Callback] Processing error:', error.message, error.stack);
-  }
-});
+router.post('/mpesa/callback', depositSettlement.handleStkCallback);
 
 // POST /users/mpesa/verify - Manually verify a pending M-Pesa transaction
 router.post('/mpesa/verify', authMiddleware, async (req, res) => {
@@ -368,90 +300,85 @@ router.post('/mpesa/verify', authMiddleware, async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to verify this transaction' });
     }
 
-    if (transaction.status !== 'pending') {
+    // Repair false failures from STK Query ResultCode 4999 ("still processing").
+    if (
+      transaction.status === 'failed' &&
+      !transaction.mpesaReceiptNumber &&
+      !transaction.credited &&
+      [4999, 1037].includes(Number(transaction.resultCode))
+    ) {
+      transaction.status = 'pending';
+      transaction.resultCode = null;
+      transaction.resultDesc = 'The transaction is still under processing';
+      transaction.processedAt = null;
+      await transaction.save();
+      console.log('[M-Pesa Verify] Reopened false FAILED (ResultCode 4999) as PENDING:', transaction._id);
+    }
+
+    const canRecoverFalseFailure =
+      transaction.status === 'failed' && !transaction.mpesaReceiptNumber && !transaction.credited;
+
+    if (transaction.status === 'completed' || transaction.credited) {
+      const user = await User.findById(req.user.id).select('balance');
+      return res.status(200).json({
+        message: `Transaction already resolved as: ${transaction.status}`,
+        transaction: {
+          id: String(transaction._id),
+          status: 'completed',
+          amount: transaction.amount,
+          balanceAfter: transaction.balanceAfter,
+          mpesaReceiptNumber: transaction.mpesaReceiptNumber,
+          resultDesc: transaction.resultDesc,
+        },
+        balance: Number(user?.balance ?? transaction.balanceAfter ?? 0),
+      });
+    }
+
+    if (transaction.status !== 'pending' && !canRecoverFalseFailure) {
       return res.status(200).json({
         message: `Transaction already resolved as: ${transaction.status}`,
         transaction: {
           id: String(transaction._id),
           status: transaction.status,
+          amount: transaction.amount,
+          balanceAfter: transaction.balanceAfter,
           mpesaReceiptNumber: transaction.mpesaReceiptNumber,
           resultDesc: transaction.resultDesc,
         },
       });
     }
 
-    // Query M-Pesa STK Push status
-    const targetCheckoutId = transaction.checkoutRequestId || transaction.reference;
-    const queryResult = await mpesaService.querySTKPushStatus(targetCheckoutId);
-
-    if (String(queryResult.ResultCode) === '0') {
-      // Payment was successful — update transaction
-      const updated = await Transaction.findOneAndUpdate(
-        { _id: transaction._id, status: 'pending' },
-        {
-          $set: {
-            status: 'completed',
-            resultCode: Number(queryResult.ResultCode),
-            resultDesc: queryResult.ResultDesc,
-            processedAt: new Date(),
-          },
+    const confirmed = await depositSettlement.tryConfirmPaidFromQuery(transaction);
+    if (confirmed?.settled) {
+      const user = await User.findById(req.user.id).select('balance');
+      return res.status(200).json({
+        message: 'Payment verified and completed successfully',
+        transaction: {
+          id: String(confirmed.settled._id),
+          status: confirmed.settled.status,
+          amount: confirmed.settled.amount,
+          balanceAfter: confirmed.settled.balanceAfter,
+          mpesaReceiptNumber: confirmed.settled.mpesaReceiptNumber,
         },
-        { new: true }
+        balance: Number(user?.balance ?? confirmed.settled.balanceAfter ?? 0),
+      });
+    }
+
+    const queryResult = confirmed?.queryResult;
+    if (queryResult && depositSettlement.isProcessingResult(queryResult.ResultCode, queryResult.ResultDesc)) {
+      console.log(
+        '[M-Pesa Verify] Still processing — CheckoutRequestID:',
+        transaction.checkoutRequestId,
+        'ResultCode:',
+        queryResult.ResultCode
       );
-
-      if (updated) {
-        // Credit user balance
-        const user = await User.findById(updated.userId);
-        if (user) {
-          const newBalance = Number(user.balance || 0) + updated.amount;
-          user.balance = newBalance;
-          await user.save();
-          updated.balanceAfter = newBalance;
-          await updated.save();
-
-          console.log('[M-Pesa Verify] Payment confirmed SUCCESS — User:', user._id, 'Amount:', updated.amount);
-        }
-
-        return res.status(200).json({
-          message: 'Payment verified and completed successfully',
-          transaction: {
-            id: String(updated._id),
-            status: updated.status,
-            amount: updated.amount,
-            mpesaReceiptNumber: updated.mpesaReceiptNumber,
-          },
-        });
-      }
-    } else {
-      // Payment failed or still pending
-      const resultCode = Number(queryResult.ResultCode);
-
-      // ResultCode 1032 = cancelled, 1037 = timeout, etc. — mark as failed
-      if (resultCode !== 0) {
-        await Transaction.findOneAndUpdate(
-          { _id: transaction._id, status: 'pending' },
-          {
-            $set: {
-              status: 'failed',
-              resultCode: resultCode,
-              resultDesc: queryResult.ResultDesc,
-              processedAt: new Date(),
-            },
-          }
-        );
-
-        console.log('[M-Pesa Verify] Payment confirmed FAILED — ResultCode:', resultCode);
-
-        return res.status(200).json({
-          message: `Transaction failed: ${queryResult.ResultDesc}`,
-          transaction: {
-            id: String(transaction._id),
-            status: 'failed',
-            resultCode: resultCode,
-            resultDesc: queryResult.ResultDesc,
-          },
-        });
-      }
+    } else if (queryResult) {
+      console.log(
+        '[M-Pesa Verify] Non-success query result kept PENDING — ResultCode:',
+        queryResult.ResultCode,
+        'ResultDesc:',
+        queryResult.ResultDesc
+      );
     }
 
     return res.status(200).json({
@@ -463,7 +390,61 @@ router.post('/mpesa/verify', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('[M-Pesa Verify] Error:', error.message);
-    return res.status(500).json({ message: 'Verification failed', error: error.message });
+    // Query/API errors must not flip PENDING → FAILED.
+    return res.status(200).json({
+      message: 'Transaction is still being processed by M-Pesa',
+      transaction: {
+        id: String(transaction._id),
+        status: 'pending',
+      },
+    });
+  }
+});
+
+// GET /users/deposits/:id/status — live payment status + current wallet balance
+router.get('/deposits/:id/status', authMiddleware, async (req, res) => {
+  try {
+    let transaction = await Transaction.findById(req.params.id);
+    if (!transaction) {
+      return res.status(404).json({ message: 'Transaction not found' });
+    }
+    if (String(transaction.userId) !== String(req.user.id)) {
+      return res.status(403).json({ message: 'Not authorized to view this transaction' });
+    }
+
+    const ageMs = transaction.createdAt ? Date.now() - new Date(transaction.createdAt).getTime() : 0;
+    if (
+      ageMs >= 12000 &&
+      !transaction.credited &&
+      transaction.status !== 'completed'
+    ) {
+      try {
+        const confirmed = await depositSettlement.tryConfirmPaidFromQuery(transaction);
+        if (confirmed?.settled) {
+          transaction = confirmed.settled;
+        }
+      } catch (error) {
+        console.warn('[Deposit Status] Query confirm skipped:', error.message);
+      }
+    }
+
+    const user = await User.findById(req.user.id).select('balance');
+    const status = getPublicDepositStatus(transaction);
+    const finalFailure = isFinalFailure(transaction);
+
+    return res.status(200).json({
+      id: String(transaction._id),
+      status,
+      final: status === 'completed' || finalFailure,
+      credited: Boolean(transaction.credited),
+      amount: transaction.amount,
+      resultCode: transaction.resultCode,
+      resultDesc: transaction.resultDesc,
+      mpesaReceiptNumber: transaction.mpesaReceiptNumber,
+      balance: Number(user?.balance || 0),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to fetch deposit status', error: error.message });
   }
 });
 

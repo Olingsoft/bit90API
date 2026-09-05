@@ -14,6 +14,7 @@ const { connectMongo } = require('./config/mongodb');
 const { startRoundLoop } = require('./services/gameLoop');
 const { initSocket } = require('./services/socketService');
 const { getPublicState } = require('./services/gameState');
+const { handleStkCallback } = require('./services/depositSettlement');
 
 dotenv.config();
 
@@ -108,10 +109,17 @@ app.get('/', (req, res) => {
 // Application routes
 // ─────────────────────────────────────────────
 app.use('/users', userRoutes);
+app.use('/api/users', userRoutes);
 app.use('/aviator', aviatorRoutes);
+app.use('/api/aviator', aviatorRoutes);
 app.use('/admin', adminAuthRoutes);
+app.use('/api/admin', adminAuthRoutes);
 app.use('/admin', adminRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/admin', adminManagementRoutes);
+app.use('/api/admin', adminManagementRoutes);
+app.post('/api/mpesa/callback', handleStkCallback);
+app.post('/mpesa/callback', handleStkCallback);
 
 // ─────────────────────────────────────────────
 // Global error handler — MUST come after routes.

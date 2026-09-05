@@ -48,7 +48,6 @@ const transactionSchema = new mongoose.Schema(
     checkoutRequestId: {
       type: String,
       default: null,
-      index: true,
     },
     merchantRequestId: {
       type: String,
@@ -74,6 +73,10 @@ const transactionSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    credited: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: { createdAt: true, updatedAt: false },
@@ -85,7 +88,20 @@ transactionSchema.index({ createdAt: -1 });
 transactionSchema.index({ type: 1 });
 transactionSchema.index({ status: 1 });
 transactionSchema.index({ reference: 1 });
-transactionSchema.index({ checkoutRequestId: 1 });
+transactionSchema.index(
+  { checkoutRequestId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { checkoutRequestId: { $type: 'string' } },
+  }
+);
+transactionSchema.index(
+  { mpesaReceiptNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { mpesaReceiptNumber: { $type: 'string' } },
+  }
+);
 
 module.exports = mongoose.model('Transaction', transactionSchema);
 

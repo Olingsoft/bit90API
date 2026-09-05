@@ -19,6 +19,22 @@ function getTokenFromRequest(req) {
   return cookies.admin_token || null;
 }
 
+function verifyJwt(token) {
+  const secrets = [...new Set(
+    [process.env.JWT_SECRET, 'default_jwt_secret', 'your-secret-key'].filter(Boolean)
+  )];
+
+  let lastError = null;
+  for (const secret of secrets) {
+    try {
+      return jwt.verify(token, secret);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('Invalid token');
+}
+
 function authMiddleware(req, res, next) {
   const token = getTokenFromRequest(req);
 
@@ -27,8 +43,7 @@ function authMiddleware(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-    req.user = decoded;
+    req.user = verifyJwt(token);
     next();
   } catch (error) {
     return res.status(401).json({ message: 'Invalid or expired token' });

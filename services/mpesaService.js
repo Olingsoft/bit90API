@@ -175,8 +175,26 @@ async function initiateSTKPush({ phone, amount, accountRef, transactionDesc }) {
  * @param {string} checkoutRequestId - The CheckoutRequestID from the STK Push response
  * @returns {Object} { ResultCode, ResultDesc, ... }
  */
+const stkQueryLastCall = new Map();
+const STK_QUERY_MIN_INTERVAL_MS = 10000;
+
 async function querySTKPushStatus(checkoutRequestId) {
   validateEnv();
+
+  const lastCall = stkQueryLastCall.get(checkoutRequestId) || 0;
+  const waitMs = STK_QUERY_MIN_INTERVAL_MS - (Date.now() - lastCall);
+  if (waitMs > 0) {
+    console.log(
+      '[M-Pesa] STK Query throttled for CheckoutRequestID:',
+      checkoutRequestId
+    );
+    return {
+      ResultCode: 'PROCESSING',
+      ResultDesc: 'The transaction is still under processing',
+    };
+  }
+  stkQueryLastCall.set(checkoutRequestId, Date.now());
+
 
   const shortcode = process.env.MPESA_SHORTCODE;
   const passkey = process.env.MPESA_PASSKEY;
@@ -202,10 +220,40 @@ async function querySTKPushStatus(checkoutRequestId) {
   });
 
   const data = await response.json();
+  const faultString = data?.fault?.faultstring || '';
+  const errorCode = String(data.errorCode || data?.fault?.detail?.errorcode || '');
+  const errorMessage = String(data.errorMessage || faultString || '');
+  const resultCode = data.ResultCode;
+  const resultDesc = String(data.ResultDesc || errorMessage || '');
 
-  if (!response.ok || data.errorCode) {
+  // Still in flight — never treat these as a final failure.
+  const stillProcessing =
+    resultCode === 4999 ||
+    String(resultCode) === '4999' ||
+    errorCode === '500.001.1001' ||
+    errorCode.includes('SpikeArrest') ||
+    /spike arrest/i.test(errorMessage) ||
+    /still under processing/i.test(resultDesc) ||
+    /being processed/i.test(errorMessage);
+
+  if (stillProcessing) {
+    console.log(
+      '[M-Pesa] STK Query still processing — CheckoutRequestID:',
+      checkoutRequestId,
+      'ResultCode:',
+      resultCode ?? 'n/a',
+      'Desc:',
+      resultDesc || errorMessage
+    );
+    return {
+      ResultCode: 'PROCESSING',
+      ResultDesc: resultDesc || errorMessage || 'The transaction is still under processing',
+    };
+  }
+
+  if (!response.ok || data.errorCode || data.fault) {
     console.error('[M-Pesa] STK Query failed:', JSON.stringify(data));
-    throw new Error(data.errorMessage || 'STK Query request failed');
+    throw new Error(data.errorMessage || faultString || 'STK Query request failed');
   }
 
   console.log('[M-Pesa] STK Query result — ResultCode:', data.ResultCode, 'ResultDesc:', data.ResultDesc);
